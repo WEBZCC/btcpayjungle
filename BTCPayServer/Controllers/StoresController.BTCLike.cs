@@ -117,7 +117,8 @@ namespace BTCPayServer.Controllers
                     {
                         UTF8Encoding UTF8NOBOM = new UTF8Encoding(false);
                         var bytes = UTF8NOBOM.GetBytes(JsonConvert.SerializeObject(result, network.NBXplorerNetwork.JsonSerializerSettings));
-                        await webSocket.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, new CancellationTokenSource(2000).Token);
+                        using var cts = new CancellationTokenSource(2000);
+                        await webSocket.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, cts.Token);
                     }
                 }
                 catch { }
@@ -328,7 +329,15 @@ namespace BTCPayServer.Controllers
             var network = _NetworkProvider.GetNetwork<BTCPayNetwork>(cryptoCode);
             var client = _ExplorerProvider.GetExplorerClient(cryptoCode);
             var response = await client.GenerateWalletAsync(request);
-
+            if (response == null)
+            {
+                TempData.SetStatusMessageModel(new StatusMessageModel()
+                {
+                    Severity = StatusMessageModel.StatusSeverity.Error,
+                    Html = "There was an error generating your wallet. Is your node available?"
+                });
+                return RedirectToAction("AddDerivationScheme", new {storeId, cryptoCode});
+            }
             var store = HttpContext.GetStoreData();
             var result = await AddDerivationScheme(storeId,
                 new DerivationSchemeViewModel()
