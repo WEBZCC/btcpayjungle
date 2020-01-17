@@ -862,6 +862,7 @@ namespace BTCPayServer.Tests
                 Assert.Equal(tx.Id, txId.ToString());
 
                 // Hijack the test to see if we can add label and comments
+                Assert.IsType<RedirectToActionResult>(await walletController.ModifyTransaction(walletId, tx.Id, addcomment: "hello-pouet"));
                 Assert.IsType<RedirectToActionResult>(await walletController.ModifyTransaction(walletId, tx.Id, addlabel: "test"));
                 Assert.IsType<RedirectToActionResult>(await walletController.ModifyTransaction(walletId, tx.Id, addlabelclick: "test2"));
                 Assert.IsType<RedirectToActionResult>(await walletController.ModifyTransaction(walletId, tx.Id, addcomment: "hello"));
@@ -2683,16 +2684,12 @@ noninventoryitem:
             var all = string.Join("\r\n", factory.GetSupportedExchanges().Select(e => e.Id).ToArray());
             foreach (var result in factory
                 .Providers
-                .Where(p => p.Value is BackgroundFetcherRateProvider)
+                .Where(p => p.Value is BackgroundFetcherRateProvider bf && !(bf.Inner is CoinGeckoRateProvider cg && !cg.CoinGeckoRate))
                 .Select(p => (ExpectedName: p.Key, ResultAsync: p.Value.GetRatesAsync(default), Fetcher: (BackgroundFetcherRateProvider)p.Value))
                 .ToList())
             {
                 
                 Logs.Tester.LogInformation($"Testing {result.ExpectedName}");
-                if (result.ExpectedName == "quadrigacx")
-                    continue; // 29 january, the exchange is down
-                if (result.ExpectedName == "coinaverage")
-                    continue; // no more free plan
                 result.Fetcher.InvalidateCache();
                 var exchangeRates = result.ResultAsync.Result;
                 result.Fetcher.InvalidateCache();
@@ -2785,12 +2782,7 @@ noninventoryitem:
 
         public static RateProviderFactory CreateBTCPayRateFactory()
         {
-            return new RateProviderFactory(CreateMemoryCache(), new MockHttpClientFactory(), new CoinAverageSettings());
-        }
-
-        private static MemoryCacheOptions CreateMemoryCache()
-        {
-            return new MemoryCacheOptions() { ExpirationScanFrequency = TimeSpan.FromSeconds(1.0) };
+            return new RateProviderFactory(new MockHttpClientFactory());
         }
 
         class SpyRateProvider : IRateProvider
@@ -2894,42 +2886,17 @@ noninventoryitem:
         public void CheckRatesProvider()
         {
             var spy = new SpyRateProvider();
-            RateRules.TryParse("X_X = coinaverage(X_X);", out var rateRules);
+            RateRules.TryParse("X_X = bittrex(X_X);", out var rateRules);
 
             var factory = CreateBTCPayRateFactory();
             factory.Providers.Clear();
-            factory.Providers.Add("coinaverage", new CachedRateProvider("coinaverage", spy, new MemoryCache(CreateMemoryCache())));
-            factory.Providers.Add("bittrex", new CachedRateProvider("bittrex", spy, new MemoryCache(CreateMemoryCache())));
             factory.CacheSpan = TimeSpan.FromSeconds(1);
-
             var fetcher = new RateFetcher(factory);
-
-            var fetchedRate = fetcher.FetchRate(CurrencyPair.Parse("BTC_USD"), rateRules, default).GetAwaiter().GetResult();
-            spy.AssertHit();
-            fetchedRate = fetcher.FetchRate(CurrencyPair.Parse("BTC_USD"), rateRules, default).GetAwaiter().GetResult();
-            spy.AssertNotHit();
-
-            Thread.Sleep(3000);
-            fetchedRate = fetcher.FetchRate(CurrencyPair.Parse("BTC_USD"), rateRules, default).GetAwaiter().GetResult();
-            spy.AssertHit();
-            fetchedRate = fetcher.FetchRate(CurrencyPair.Parse("BTC_USD"), rateRules, default).GetAwaiter().GetResult();
-            spy.AssertNotHit();
-            // Should cache at exchange level so this should hit the cache
-            var fetchedRate2 = fetcher.FetchRate(CurrencyPair.Parse("LTC_USD"), rateRules, default).GetAwaiter().GetResult();
-            spy.AssertNotHit();
-            Assert.Null(fetchedRate2.BidAsk);
-            Assert.Equal(RateRulesErrors.RateUnavailable, fetchedRate2.Errors.First());
-
-            // Should cache at exchange level this should not hit the cache as it is different exchange
-            RateRules.TryParse("X_X = bittrex(X_X);", out rateRules);
-            fetchedRate = fetcher.FetchRate(CurrencyPair.Parse("BTC_USD"), rateRules, default).GetAwaiter().GetResult();
-            spy.AssertHit();
-
             factory.Providers.Clear();
             var fetch = new BackgroundFetcherRateProvider("spy", spy);
             fetch.DoNotAutoFetchIfExpired = true;
             factory.Providers.Add("bittrex", fetch);
-            fetchedRate = fetcher.FetchRate(CurrencyPair.Parse("BTC_USD"), rateRules, default).GetAwaiter().GetResult();
+            var fetchedRate = fetcher.FetchRate(CurrencyPair.Parse("BTC_USD"), rateRules, default).GetAwaiter().GetResult();
             spy.AssertHit();
             fetchedRate = fetcher.FetchRate(CurrencyPair.Parse("BTC_USD"), rateRules, default).GetAwaiter().GetResult();
             spy.AssertNotHit();
