@@ -2681,6 +2681,7 @@ noninventoryitem:
         public void CanQueryDirectProviders()
         {
             var factory = CreateBTCPayRateFactory();
+            var directlySupported = factory.GetSupportedExchanges().Where(s => s.Source == RateSource.Direct).Select(s => s.Id).ToHashSet();
             var all = string.Join("\r\n", factory.GetSupportedExchanges().Select(e => e.Id).ToArray());
             foreach (var result in factory
                 .Providers
@@ -2712,6 +2713,10 @@ noninventoryitem:
                                && e.BidAsk.Bid > 1.0m // 1BTC will always be more than 1USD
                                );
                 }
+                // We are not showing a directly implemented exchange as directly implemented in the UI
+                // we need to modify the AvailableRateProvider
+                if (result.ExpectedName != "coinaverage")
+                    Assert.Contains(result.ExpectedName, directlySupported);
             }
             // Kraken emit one request only after first GetRates
             factory.Providers["kraken"].GetRatesAsync(default).GetAwaiter().GetResult();
@@ -2727,7 +2732,7 @@ noninventoryitem:
             await provider.GetRatesAsync(default);
             var state = provider.GetState();
             Assert.Single(state.Rates, r => r.Pair == new CurrencyPair("BTC", "EUR"));
-            var provider2 = new BackgroundFetcherRateProvider("kraken", provider.Inner)
+            var provider2 = new BackgroundFetcherRateProvider(provider.Inner)
             {
                 RefreshRate = provider.RefreshRate,
                 ValidatyTime = provider.ValidatyTime
@@ -2746,7 +2751,6 @@ noninventoryitem:
                 // Should not throw, as things should be cached
                 await provider2.GetRatesAsync(cts.Token);
             }
-            Assert.Equal(provider.ExchangeName, provider2.ExchangeName);
             Assert.Equal(provider.NextUpdate, provider2.NextUpdate);
             Assert.NotEqual(provider.LastRequested, provider2.LastRequested);
             Assert.Equal(provider.Expiration, provider2.Expiration);
@@ -2782,7 +2786,7 @@ noninventoryitem:
 
         public static RateProviderFactory CreateBTCPayRateFactory()
         {
-            return new RateProviderFactory(new MockHttpClientFactory());
+            return new RateProviderFactory(TestUtils.CreateHttpFactory());
         }
 
         class SpyRateProvider : IRateProvider
@@ -2892,7 +2896,7 @@ noninventoryitem:
             factory.Providers.Clear();
             var fetcher = new RateFetcher(factory);
             factory.Providers.Clear();
-            var fetch = new BackgroundFetcherRateProvider("spy", spy);
+            var fetch = new BackgroundFetcherRateProvider(spy);
             fetch.DoNotAutoFetchIfExpired = true;
             factory.Providers.Add("bittrex", fetch);
             var fetchedRate = fetcher.FetchRate(CurrencyPair.Parse("BTC_USD"), rateRules, default).GetAwaiter().GetResult();
