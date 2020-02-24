@@ -32,6 +32,7 @@ using BTCPayServer.Payments.Bitcoin;
 using BTCPayServer.Payments.Changelly;
 using BTCPayServer.Payments.Lightning;
 using BTCPayServer.Security;
+using BTCPayServer.Security.APIKeys;
 using BTCPayServer.Services.PaymentRequests;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
 using NBXplorer.DerivationStrategy;
@@ -241,11 +242,11 @@ namespace BTCPayServer.Hosting
             services.AddTransient<PaymentRequestController>();
             // Add application services.
             services.AddSingleton<EmailSenderFactory>();
-            // bundling
-
-            services.AddBtcPayServerAuthenticationSchemes(configuration);
+            
+            services.AddAPIKeyAuthentication();
+            services.AddBtcPayServerAuthenticationSchemes();
             services.AddAuthorization(o => o.AddBTCPayPolicies());
-
+            // bundling
             services.AddSingleton<IBundleProvider, ResourceBundleProvider>();
             services.AddTransient<BundleOptions>(provider =>
             {
@@ -260,10 +261,20 @@ namespace BTCPayServer.Hosting
             {
                 options.AddPolicy(CorsPolicies.All, p => p.AllowAnyHeader().AllowAnyMethod().AllowAnyOrigin());
             });
-
-            var rateLimits = new RateLimitService();
-            rateLimits.SetZone($"zone={ZoneLimits.Login} rate=5r/min burst=3 nodelay");
-            services.AddSingleton(rateLimits);
+            services.AddSingleton(provider =>
+            {
+                var btcPayEnv = provider.GetService<BTCPayServerEnvironment>();
+                var rateLimits = new RateLimitService();
+                if (btcPayEnv.IsDevelopping)
+                {
+                    rateLimits.SetZone($"zone={ZoneLimits.Login} rate=1000r/min burst=100 nodelay");
+                }
+                else
+                {
+                    rateLimits.SetZone($"zone={ZoneLimits.Login} rate=5r/min burst=3 nodelay");
+                }
+                return rateLimits;
+            });
 
 
             services.AddLogging(logBuilder =>
@@ -282,12 +293,12 @@ namespace BTCPayServer.Hosting
             return services;
         }
         private const long MAX_DEBUG_LOG_FILE_SIZE = 2000000; // If debug log is in use roll it every N MB.
-        private static void AddBtcPayServerAuthenticationSchemes(this IServiceCollection services,
-            IConfiguration configuration)
+        private static void AddBtcPayServerAuthenticationSchemes(this IServiceCollection services)
         {
             services.AddAuthentication()
                 .AddCookie()
-                .AddBitpayAuthentication();
+                .AddBitpayAuthentication()
+                .AddAPIKeyAuthentication();
         }
 
         public static IApplicationBuilder UsePayServer(this IApplicationBuilder app)
