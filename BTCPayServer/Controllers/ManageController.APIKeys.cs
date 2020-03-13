@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Threading.Tasks;
+using BTCPayServer.Client;
 using BTCPayServer.Data;
 using BTCPayServer.Hosting.OpenApi;
 using BTCPayServer.Models;
@@ -10,7 +11,10 @@ using BTCPayServer.Security;
 using BTCPayServer.Security.APIKeys;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using NBitcoin;
+using NBitcoin.DataEncoders;
 using NSwag.Annotations;
+using YamlDotNet.Core.Tokens;
 
 namespace BTCPayServer.Controllers
 {
@@ -27,8 +31,6 @@ namespace BTCPayServer.Controllers
                 })
             });
         }
-
-        
         
         [HttpGet("api-keys/{id}/delete")]
         public async Task<IActionResult> RemoveAPIKey(string id)
@@ -40,10 +42,10 @@ namespace BTCPayServer.Controllers
             }
             return View("Confirm", new ConfirmModel()
             {
-                Title = "Delete API Key "+ ( string.IsNullOrEmpty(key.Label)? string.Empty: key.Label) + "("+key.Id+")",
+                Title = "Delete API Key " + (string.IsNullOrEmpty(key.Label) ? string.Empty : key.Label) + "(" + key.Id + ")",
                 Description = "Any application using this api key will immediately lose access",
                 Action = "Delete",
-                ActionUrl = Request.GetCurrentUrl().Replace("RemoveAPIKey", "RemoveAPIKeyPost")
+                ActionUrl = this.Url.ActionLink(nameof(RemoveAPIKeyPost), values: new { id = id })
             });
         }
 
@@ -107,9 +109,13 @@ namespace BTCPayServer.Controllers
             var vm = await SetViewModelValues(new AuthorizeApiKeysViewModel()
             {
                 Label = applicationName,
-                ServerManagementPermission = permissions.Contains(APIKeyConstants.Permissions.ServerManagement),
-                StoreManagementPermission = permissions.Contains(APIKeyConstants.Permissions.StoreManagement),
+                ServerManagementPermission = permissions.Contains(Permissions.ServerManagement),
+                StoreManagementPermission = permissions.Contains(Permissions.StoreManagement),
                 PermissionsFormatted = permissions,
+                PermissionValues = permissions.Where(s =>
+                        !s.Contains(Permissions.StoreManagement, StringComparison.InvariantCultureIgnoreCase) &&
+                        s != Permissions.ServerManagement)
+                    .Select(s => new AddApiKeyViewModel.PermissionValueItem() {Permission = s, Value = true}).ToList(),
                 ApplicationName = applicationName,
                 SelectiveStores = selectiveStores,
                 Strict = strict,
@@ -131,7 +137,7 @@ namespace BTCPayServer.Controllers
             }
 
 
-            if (viewModel.PermissionsFormatted.Contains(APIKeyConstants.Permissions.ServerManagement))
+            if (viewModel.PermissionsFormatted.Contains(Permissions.ServerManagement))
             {
                 if (!viewModel.IsServerAdmin && viewModel.ServerManagementPermission)
                 {
@@ -145,7 +151,7 @@ namespace BTCPayServer.Controllers
                 }
             }
 
-            if (viewModel.PermissionsFormatted.Contains(APIKeyConstants.Permissions.StoreManagement))
+            if (viewModel.PermissionsFormatted.Contains(Permissions.StoreManagement))
             {
                 if (!viewModel.SelectiveStores &&
                     viewModel.StoreMode == AddApiKeyViewModel.ApiKeyStoreMode.Specific)
@@ -247,7 +253,7 @@ namespace BTCPayServer.Controllers
         {
             var key = new APIKeyData()
             {
-                Id = Guid.NewGuid().ToString().Replace("-", string.Empty),
+                Id = Encoders.Hex.EncodeData(RandomUtils.GetBytes(20)),
                 Type = APIKeyType.Permanent,
                 UserId = _userManager.GetUserId(User),
                 Label = viewModel.Label
@@ -259,29 +265,34 @@ namespace BTCPayServer.Controllers
 
         private IEnumerable<string> GetPermissionsFromViewModel(AddApiKeyViewModel viewModel)
         {
-            var permissions = new List<string>();
+            var permissions = viewModel.PermissionValues.Where(tuple => tuple.Value).Select(tuple => tuple.Permission).ToList();
 
             if (viewModel.StoreMode == AddApiKeyViewModel.ApiKeyStoreMode.Specific)
             {
-                permissions.AddRange(viewModel.SpecificStores.Select(APIKeyConstants.Permissions.GetStorePermission));
+                permissions.AddRange(viewModel.SpecificStores.Select(Permissions.GetStorePermission));
             }
             else if (viewModel.StoreManagementPermission)
             {
-                permissions.Add(APIKeyConstants.Permissions.StoreManagement);
+                permissions.Add(Permissions.StoreManagement);
             }
 
             if (viewModel.IsServerAdmin && viewModel.ServerManagementPermission)
             {
-                permissions.Add(APIKeyConstants.Permissions.ServerManagement);
+                permissions.Add(Permissions.ServerManagement);
             }
 
-            return permissions;
+            return permissions.Distinct();
         }
 
         private async Task<T> SetViewModelValues<T>(T viewModel) where T : AddApiKeyViewModel
         {
             viewModel.Stores = await _StoreRepository.GetStoresByUserId(_userManager.GetUserId(User));
-            viewModel.IsServerAdmin = (await _authorizationService.AuthorizeAsync(User, Policies.CanModifyServerSettings.Key)).Succeeded;
+            viewModel.IsServerAdmin =
+                (await _authorizationService.AuthorizeAsync(User, Policies.CanModifyServerSettings.Key)).Succeeded;
+            viewModel.PermissionValues ??= Permissions.GetAllPermissionKeys().Where(s =>
+                    !s.Contains(Permissions.StoreManagement, StringComparison.InvariantCultureIgnoreCase) &&
+                    s != Permissions.ServerManagement)
+                .Select(s => new AddApiKeyViewModel.PermissionValueItem() {Permission = s, Value = true}).ToList();
             return viewModel;
         }
 
@@ -295,11 +306,18 @@ namespace BTCPayServer.Controllers
             public bool ServerManagementPermission { get; set; }
             public bool StoreManagementPermission { get; set; }
             public string Command { get; set; }
+            public List<PermissionValueItem> PermissionValues { get; set; }
 
             public enum ApiKeyStoreMode
             {
                 AllStores,
                 Specific
+            }
+
+            public class PermissionValueItem
+            {
+                public string Permission { get; set; }
+                public bool Value { get; set; }
             }
         }
 
