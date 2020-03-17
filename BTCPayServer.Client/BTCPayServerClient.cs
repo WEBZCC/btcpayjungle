@@ -15,8 +15,6 @@ namespace BTCPayServer.Client
         private readonly Uri _btcpayHost;
         private readonly HttpClient _httpClient;
 
-        public string APIKey => _apiKey;
-
         private readonly JsonSerializerOptions _serializerOptions = new JsonSerializerOptions()
         {
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase
