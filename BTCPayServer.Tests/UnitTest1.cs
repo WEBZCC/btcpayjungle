@@ -61,6 +61,8 @@ using NBXplorer.DerivationStrategy;
 using BTCPayServer.U2F.Models;
 using BTCPayServer.Security.Bitpay;
 using MemoryCache = Microsoft.Extensions.Caching.Memory.MemoryCache;
+using Newtonsoft.Json.Schema;
+using BTCPayServer.Client;
 
 namespace BTCPayServer.Tests
 {
@@ -88,6 +90,20 @@ namespace BTCPayServer.Tests
                 checkLinks.Add(CheckLinks(regex, httpClient, file));
             }
             await Task.WhenAll(checkLinks);
+        }
+
+        [Fact]
+        [Trait("Fast", "Fast")]
+        public async Task CheckSwaggerIsConformToSchema()
+        {
+            JObject swagger = JObject.Parse(File.ReadAllText(Path.Combine(TestUtils.TryGetSolutionDirectoryInfo().FullName, "BTCPayServer", "wwwroot", "swagger", "v1", "swagger.template.json")));
+            using HttpClient client = new HttpClient();
+            var resp = await client.GetAsync("https://raw.githubusercontent.com/OAI/OpenAPI-Specification/master/schemas/v3.0/schema.json");
+            var schema = JSchema.Parse(await resp.Content.ReadAsStringAsync());
+            IList<ValidationError> errors;
+            bool valid = swagger.IsValid(schema, out errors);
+            Assert.Empty(errors);
+            Assert.True(valid);
         }
 
         private static async Task CheckLinks(Regex regex, HttpClient httpClient, string file)
@@ -2766,7 +2782,6 @@ noninventoryitem:
                 .Select(p => (ExpectedName: p.Key, ResultAsync: p.Value.GetRatesAsync(default), Fetcher: (BackgroundFetcherRateProvider)p.Value))
                 .ToList())
             {
-
                 Logs.Tester.LogInformation($"Testing {result.ExpectedName}");
                 if (result.ExpectedName == "ndax")
                 {
@@ -2984,6 +2999,22 @@ noninventoryitem:
             var builder = new DbContextOptionsBuilder<ApplicationDbContext>();
             builder.UseSqlite("Data Source=temp.db");
             await new ApplicationDbContext(builder.Options).Database.MigrateAsync();
+        }
+
+        [Fact(Timeout = TestTimeout)]
+        [Trait("Fast", "Fast")]
+        public void CanUsePermission()
+        {
+            Assert.True(Permission.Create(Policies.CanModifyServerSettings).Contains(Permission.Create(Policies.CanModifyServerSettings)));
+            Assert.True(Permission.Create(Policies.CanModifyProfile).Contains(Permission.Create(Policies.CanViewProfile)));
+            Assert.True(Permission.Create(Policies.CanModifyStoreSettings).Contains(Permission.Create(Policies.CanViewStoreSettings)));
+            Assert.False(Permission.Create(Policies.CanViewStoreSettings).Contains(Permission.Create(Policies.CanModifyStoreSettings)));
+            Assert.False(Permission.Create(Policies.CanModifyServerSettings).Contains(Permission.Create(Policies.CanModifyStoreSettings)));
+            Assert.True(Permission.Create(Policies.Unrestricted).Contains(Permission.Create(Policies.CanModifyStoreSettings)));
+            Assert.True(Permission.Create(Policies.Unrestricted).Contains(Permission.Create(Policies.CanModifyStoreSettings, "abc")));
+
+            Assert.True(Permission.Create(Policies.CanViewStoreSettings).Contains(Permission.Create(Policies.CanViewStoreSettings, "abcd")));
+            Assert.False(Permission.Create(Policies.CanModifyStoreSettings, "abcd").Contains(Permission.Create(Policies.CanModifyStoreSettings)));
         }
 
         [Fact(Timeout = TestTimeout)]

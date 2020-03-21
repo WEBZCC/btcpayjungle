@@ -4,8 +4,9 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Headers;
-using System.Text.Json;
+using System.Text;
 using System.Threading.Tasks;
+using Newtonsoft.Json;
 
 namespace BTCPayServer.Client
 {
@@ -17,11 +18,13 @@ namespace BTCPayServer.Client
 
         public string APIKey => _apiKey;
 
-        private readonly JsonSerializerOptions _serializerOptions = new JsonSerializerOptions()
+        public BTCPayServerClient(Uri btcpayHost, HttpClient httpClient = null)
         {
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-        };
-
+            if (btcpayHost == null)
+                throw new ArgumentNullException(nameof(btcpayHost));
+            _btcpayHost = btcpayHost;
+            _httpClient = httpClient ?? new HttpClient();
+        }
         public BTCPayServerClient(Uri btcpayHost, string APIKey, HttpClient httpClient = null)
         {
             _apiKey = APIKey;
@@ -37,7 +40,7 @@ namespace BTCPayServer.Client
         protected async Task<T> HandleResponse<T>(HttpResponseMessage message)
         {
             HandleResponse(message);
-            return JsonSerializer.Deserialize<T>(await message.Content.ReadAsStringAsync(), _serializerOptions);
+            return JsonConvert.DeserializeObject<T>(await message.Content.ReadAsStringAsync());
         }
 
         protected virtual HttpRequestMessage CreateHttpRequest(string path,
@@ -51,7 +54,8 @@ namespace BTCPayServer.Client
             }
 
             var httpRequest = new HttpRequestMessage(method ?? HttpMethod.Get, uriBuilder.Uri);
-            httpRequest.Headers.Authorization = new AuthenticationHeaderValue("token", _apiKey);
+            if (_apiKey != null)
+                httpRequest.Headers.Authorization = new AuthenticationHeaderValue("token", _apiKey);
 
 
             return httpRequest;
@@ -64,7 +68,7 @@ namespace BTCPayServer.Client
             var request = CreateHttpRequest(path, queryPayload, method);
             if (typeof(T).IsPrimitive || !EqualityComparer<T>.Default.Equals(bodyPayload, default(T)))
             {
-                request.Content = new StringContent(JsonSerializer.Serialize(bodyPayload, _serializerOptions));
+                request.Content = new StringContent(JsonConvert.SerializeObject(bodyPayload), Encoding.UTF8, "application/json");
             }
 
             return request;
