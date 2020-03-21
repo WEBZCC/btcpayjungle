@@ -171,7 +171,7 @@ namespace BTCPayServer.Tests
         {
             get; set;
         }
-
+        
         public RPCClient LBTCExplorerNode { get; set; }
 
         public ExplorerClient ExplorerClient
