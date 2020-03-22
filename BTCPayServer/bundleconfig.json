@@ -1,4 +1,4 @@
-[
+{
     {
         "outputFileName": "wwwroot/bundles/main-bundle.min.css",
         "inputFiles": [
@@ -180,4 +180,4 @@
             "wwwroot/payment-request/**/*.css"
         ]
     }
-]
+}
