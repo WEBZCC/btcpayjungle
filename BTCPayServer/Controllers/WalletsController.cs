@@ -662,13 +662,26 @@ namespace BTCPayServer.Controllers
                 uriBuilder.UnknowParameters.TryGetValue("bpu", out var vmPayJoinEndpointUrl);
                 vm.PayJoinEndpointUrl = vmPayJoinEndpointUrl;
             }
-            catch (Exception)
+            catch
             {
-                TempData.SetStatusMessageModel(new StatusMessageModel()
+                try
                 {
-                    Severity = StatusMessageModel.StatusSeverity.Error,
-                    Message = "The provided BIP21 payment URI was malformed"
-                });
+                    vm.Outputs = new List<WalletSendModel.TransactionOutput>()
+                    {
+                        new WalletSendModel.TransactionOutput()
+                        {
+                            DestinationAddress = BitcoinAddress.Create(bip21, network.NBitcoinNetwork).ToString()
+                        }
+                    };
+                }
+                catch
+                {
+                    TempData.SetStatusMessageModel(new StatusMessageModel()
+                    {
+                        Severity = StatusMessageModel.StatusSeverity.Error,
+                        Message = "The provided BIP21 payment URI was malformed"
+                    });
+                }
             }
 
             ModelState.Clear();
@@ -869,17 +882,6 @@ namespace BTCPayServer.Controllers
                 var wallet = _walletProvider.GetWallet(network);
                 var derivationSettings = GetDerivationSchemeSettings(walletId);
                 wallet.InvalidateCache(derivationSettings.AccountDerivation);
-                if (TempData.GetStatusMessageModel() == null)
-                {
-                    TempData[WellKnownTempData.SuccessMessage] =
-                        $"Transaction broadcasted successfully ({transaction.GetHash()})";
-                }
-                else
-                {
-                    var statusMessageModel = TempData.GetStatusMessageModel();
-                    statusMessageModel.Message += $" ({transaction.GetHash()})";
-                    TempData.SetStatusMessageModel(statusMessageModel);
-                }
             }
             return RedirectToAction(nameof(WalletTransactions), new { walletId = walletId.ToString() });
         }
