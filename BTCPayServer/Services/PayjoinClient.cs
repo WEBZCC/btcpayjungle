@@ -2,28 +2,57 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http;
-using System.Runtime.Serialization;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using Google.Apis.Util;
 using NBitcoin;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
 namespace BTCPayServer.Services
 {
+
+    public static class PSBTExtensions
+    {
+        public static ScriptPubKeyType? GetInputsScriptPubKeyType(this PSBT psbt)
+        {
+            if (!psbt.IsAllFinalized() || psbt.Inputs.Any(i => i.WitnessUtxo == null))
+                throw new InvalidOperationException("The psbt should be finalized with witness information");
+            var coinsPerTypes = psbt.Inputs.Select(i =>
+            {
+                if (i.WitnessUtxo.ScriptPubKey.IsScriptType(ScriptType.P2WPKH))
+                    return ((PSBTCoin)i, ScriptPubKeyType.Segwit);
+                if (i.WitnessUtxo.ScriptPubKey.IsScriptType(ScriptType.P2SH) &&
+                    i.FinalScriptWitness.ToScript().IsScriptType(ScriptType.P2WPKH))
+                    return ((PSBTCoin)i, ScriptPubKeyType.SegwitP2SH);
+                return ((PSBTCoin)i, null as ScriptPubKeyType?);
+            }).GroupBy(o => o.Item2, o => o.Item1).ToArray();
+            if (coinsPerTypes.Length != 1)
+                return default;
+            return coinsPerTypes[0].Key;
+        }
+    }
+
     public class PayjoinClient
     {
-        private readonly ExplorerClientProvider _explorerClientProvider;
-        private HttpClient _httpClient;
+        public static readonly ScriptPubKeyType[] SupportedFormats = {
+            ScriptPubKeyType.Segwit,
+            ScriptPubKeyType.SegwitP2SH
+        };
 
-        public PayjoinClient(ExplorerClientProvider explorerClientProvider, IHttpClientFactory httpClientFactory)
+        public const string BIP21EndpointKey = "bpu";
+
+        private readonly ExplorerClientProvider _explorerClientProvider;
+        private HttpClient _clearnetHttpClient;
+        private HttpClient _torHttpClient;
+
+        public PayjoinClient(ExplorerClientProvider explorerClientProvider, IHttpClientFactory httpClientFactory, Socks5HttpClientFactory socks5HttpClientFactory)
         {
             if (httpClientFactory == null) throw new ArgumentNullException(nameof(httpClientFactory));
             _explorerClientProvider =
                 explorerClientProvider ?? throw new ArgumentNullException(nameof(explorerClientProvider));
-            _httpClient = httpClientFactory.CreateClient("payjoin");
+            _clearnetHttpClient =  httpClientFactory.CreateClient("payjoin");
+            _torHttpClient = socks5HttpClientFactory.CreateClient("payjoin");
         }
 
         public async Task<PSBT> RequestPayjoin(Uri endpoint, DerivationSchemeSettings derivationSchemeSettings,
@@ -32,7 +61,14 @@ namespace BTCPayServer.Services
             if (endpoint == null) throw new ArgumentNullException(nameof(endpoint));
             if (derivationSchemeSettings == null) throw new ArgumentNullException(nameof(derivationSchemeSettings));
             if (originalTx == null) throw new ArgumentNullException(nameof(originalTx));
+            if (originalTx.IsAllFinalized())
+                throw new InvalidOperationException("The original PSBT should not be finalized.");
 
+            var type = derivationSchemeSettings.AccountDerivation.ScriptPubKeyType();
+            if (!SupportedFormats.Contains(type))
+            {
+                throw new PayjoinSenderException($"The wallet does not support payjoin");
+            }
             var signingAccount = derivationSchemeSettings.GetSigningAccountKeySettings();
             var sentBefore = -originalTx.GetBalance(derivationSchemeSettings.AccountDerivation,
                 signingAccount.AccountKey,
@@ -42,7 +78,7 @@ namespace BTCPayServer.Services
                 throw new ArgumentException("originalTx should have utxo information", nameof(originalTx));
             var originalFee = originalTx.GetFee();
             var cloned = originalTx.Clone();
-            if (!cloned.IsAllFinalized() && !cloned.TryFinalize(out var errors))
+            if (!cloned.TryFinalize(out var errors))
             {
                 return null;
             }
@@ -59,7 +95,12 @@ namespace BTCPayServer.Services
             }
 
             cloned.GlobalXPubs.Clear();
-            var bpuresponse = await _httpClient.PostAsync(endpoint,
+            HttpClient client = _clearnetHttpClient;
+            if (endpoint.IsOnion() && _torHttpClient != null)
+            {
+                client = _torHttpClient;
+            }
+            var bpuresponse = await client.PostAsync(endpoint,
                 new StringContent(cloned.ToHex(), Encoding.UTF8, "text/plain"), cancellationToken);
             if (!bpuresponse.IsSuccessStatusCode)
             {
@@ -124,12 +165,12 @@ namespace BTCPayServer.Services
             foreach (var input in newPSBT.Inputs.CoinsFor(derivationSchemeSettings.AccountDerivation,
                 signingAccount.AccountKey, signingAccount.GetRootedKeyPath()))
             {
-                if (originalTx.Inputs.FindIndexedInput(input.PrevOut) is PSBTInput ourInput)
+                if (oldGlobalTx.Inputs.FindIndexedInput(input.PrevOut) is IndexedTxIn ourInput)
                 {
                     ourInputCount++;
                     if (input.IsFinalized())
                         throw new PayjoinSenderException("A PSBT input from us should not be finalized");
-                    if (newGlobalTx.Inputs[input.Index].Sequence != newGlobalTx.Inputs[ourInput.Index].Sequence)
+                    if (newGlobalTx.Inputs[input.Index].Sequence != ourInput.TxIn.Sequence)
                         throw new PayjoinSenderException("The sequence of one of our input has been modified");
                 }
                 else
@@ -139,15 +180,19 @@ namespace BTCPayServer.Services
                 }
             }
 
-            // Making sure that the receiver's inputs are finalized and P2PWKH
+            // Making sure that the receiver's inputs are finalized and match format
+            var payjoinInputType = newPSBT.GetInputsScriptPubKeyType();
+            if (payjoinInputType is null || payjoinInputType.Value != type)
+            {
+                throw new PayjoinSenderException("The payjoin receiver included an input that is not the same segwit input type");
+            }
+
             foreach (var input in newPSBT.Inputs)
             {
                 if (originalTx.Inputs.FindIndexedInput(input.PrevOut) is null)
                 {
                     if (!input.IsFinalized())
                         throw new PayjoinSenderException("The payjoin receiver included a non finalized input");
-                    if (!(input.FinalScriptWitness.GetSigner() is WitKeyId))
-                        throw new PayjoinSenderException("The payjoin receiver included an input that is not P2PWKH");
                 }
             }
 

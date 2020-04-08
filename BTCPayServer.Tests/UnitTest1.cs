@@ -473,6 +473,28 @@ namespace BTCPayServer.Tests
 
         [Fact]
         [Trait("Fast", "Fast")]
+        public void DeterministicUTXOSorter()
+        {
+            UTXO CreateRandomUTXO()
+            {
+                return new UTXO() { Outpoint = new OutPoint(RandomUtils.GetUInt256(), RandomUtils.GetUInt32() % 0xff) };
+            }
+            var comparer = Payments.PayJoin.PayJoinEndpointController.UTXODeterministicComparer.Instance;
+            var utxos = Enumerable.Range(0, 100).Select(_ => CreateRandomUTXO()).ToArray();
+            Array.Sort(utxos, comparer);
+            var utxo53 = utxos[53];
+            Array.Sort(utxos, comparer);
+            Assert.Equal(utxo53, utxos[53]);
+            var utxo54 = utxos[54];
+            var utxo52 = utxos[52];
+            utxos = utxos.Where((_, i) => i != 53).ToArray();
+            Array.Sort(utxos, comparer);
+            Assert.Equal(utxo52, utxos[52]);
+            Assert.Equal(utxo54, utxos[53]);
+        }
+
+        [Fact]
+        [Trait("Fast", "Fast")]
         public void CanAcceptInvoiceWithTolerance()
         {
             var networkProvider = new BTCPayNetworkProvider(NetworkType.Regtest);
@@ -866,6 +888,25 @@ namespace BTCPayServer.Tests
             }
         }
 
+
+        [Fact(Timeout = TestTimeout)]
+        [Trait("Integration", "Integration")]
+        public async Task CanUseTorClient()
+        {
+            using (var tester = ServerTester.Create())
+            {
+                await tester.StartAsync();
+                var torFactory = tester.PayTester.GetService<Socks5HttpClientFactory>();
+                var client = torFactory.CreateClient("test");
+                Assert.NotNull(client);
+                var response = await client.GetAsync("https://check.torproject.org/");
+                response.EnsureSuccessStatusCode();
+                var result = await response.Content.ReadAsStringAsync();
+                Assert.DoesNotContain("You are not using Tor.", result);
+                Assert.Contains("Congratulations. This browser is configured to use Tor.", result);
+            }
+        }
+
         [Fact(Timeout = TestTimeout)]
         [Trait("Integration", "Integration")]
         public async Task CanRescanWallet()
@@ -875,7 +916,7 @@ namespace BTCPayServer.Tests
                 await tester.StartAsync();
                 var acc = tester.NewAccount();
                 acc.GrantAccess();
-                acc.RegisterDerivationScheme("BTC", true);
+                acc.RegisterDerivationScheme("BTC", ScriptPubKeyType.Segwit);
                 var btcDerivationScheme = acc.DerivationScheme;
 
                 var walletController = acc.GetController<WalletsController>();
