@@ -896,14 +896,49 @@ namespace BTCPayServer.Tests
             using (var tester = ServerTester.Create())
             {
                 await tester.StartAsync();
-                var torFactory = tester.PayTester.GetService<Socks5HttpClientFactory>();
-                var client = torFactory.CreateClient("test");
+                var proxy = tester.PayTester.GetService<Socks5HttpProxyServer>();
+                void AssertConnectionDropped()
+                {
+                    TestUtils.Eventually(() =>
+                    {
+                        Thread.MemoryBarrier();
+                        Assert.Equal(0, proxy.ConnectionCount);
+                    });
+                }
+                var httpFactory = tester.PayTester.GetService<IHttpClientFactory>();
+                var client = httpFactory.CreateClient(PayjoinClient.PayjoinOnionNamedClient);
                 Assert.NotNull(client);
                 var response = await client.GetAsync("https://check.torproject.org/");
                 response.EnsureSuccessStatusCode();
                 var result = await response.Content.ReadAsStringAsync();
                 Assert.DoesNotContain("You are not using Tor.", result);
                 Assert.Contains("Congratulations. This browser is configured to use Tor.", result);
+                AssertConnectionDropped();
+                response = await client.GetAsync("http://explorerzydxu5ecjrkwceayqybizmpjjznk5izmitf2modhcusuqlid.onion/");
+                response.EnsureSuccessStatusCode();
+                result = await response.Content.ReadAsStringAsync();
+                Assert.Contains("Bitcoin", result);
+
+                AssertConnectionDropped();
+                response = await client.GetAsync("http://explorerzydxu5ecjrkwceayqybizmpjjznk5izmitf2modhcusuqlid.onion/");
+                response.EnsureSuccessStatusCode();
+                AssertConnectionDropped();
+                client.Dispose();
+                AssertConnectionDropped();
+                client = httpFactory.CreateClient(PayjoinClient.PayjoinOnionNamedClient);
+                response = await client.GetAsync("http://explorerzydxu5ecjrkwceayqybizmpjjznk5izmitf2modhcusuqlid.onion/");
+                response.EnsureSuccessStatusCode();
+                AssertConnectionDropped();
+
+                Logs.Tester.LogInformation("Querying an onion address which can't be found should send http 500");
+                response = await client.GetAsync("http://dwoduwoi.onion/");
+                Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
+                AssertConnectionDropped();
+
+                Logs.Tester.LogInformation("Querying valid onion but unreachable should send error 502");
+                response = await client.GetAsync("http://fastrcl5totos3vekjbqcmgpnias5qytxnaj7gpxtxhubdcnfrkapqad.onion/");
+                Assert.Equal(HttpStatusCode.BadGateway, response.StatusCode);
+                AssertConnectionDropped();
             }
         }
 
