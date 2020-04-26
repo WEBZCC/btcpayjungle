@@ -21,6 +21,7 @@ using Newtonsoft.Json.Linq;
 using NicolasDorier.RateLimits;
 using NBXplorer.DerivationStrategy;
 using System.Diagnostics.CodeAnalysis;
+using NBitcoin.DataEncoders;
 
 namespace BTCPayServer.Payments.PayJoin
 {
@@ -383,8 +384,10 @@ namespace BTCPayServer.Payments.PayJoin
             Money ourFeeContribution = Money.Zero;
             // We need to adjust the fee to keep a constant fee rate
             var txBuilder = network.NBitcoinNetwork.CreateTransactionBuilder();
-            txBuilder.AddCoins(psbt.Inputs.Select(i => i.GetSignableCoin()));
-            txBuilder.AddCoins(selectedUTXOs.Select(o => o.Value.AsCoin(derivationSchemeSettings.AccountDerivation)));
+            var coins = psbt.Inputs.Select(i => i.GetSignableCoin())
+                .Concat(selectedUTXOs.Select(o => o.Value.AsCoin(derivationSchemeSettings.AccountDerivation))).ToArray();
+
+            txBuilder.AddCoins(coins);
             Money expectedFee = txBuilder.EstimateFees(newTx, originalFeeRate);
             Money actualFee = newTx.GetFee(txBuilder.FindSpentCoins(newTx));
             Money additionalFee = expectedFee - actualFee;
@@ -457,7 +460,7 @@ namespace BTCPayServer.Payments.PayJoin
             originalPaymentData.ConfirmationCount = -1;
             originalPaymentData.PayjoinInformation = new PayjoinInformation()
             {
-                CoinjoinTransactionHash = newPsbt.GetGlobalTransaction().GetHash(),
+                CoinjoinTransactionHash = GetExpectedHash(newPsbt, coins),
                 CoinjoinValue = originalPaymentValue - ourFeeContribution,
                 ContributedOutPoints = selectedUTXOs.Select(o => o.Key).ToArray()
             };
@@ -472,10 +475,25 @@ namespace BTCPayServer.Payments.PayJoin
             await _btcPayWalletProvider.GetWallet(network).SaveOffchainTransactionAsync(originalTx);
             _eventAggregator.Publish(new InvoiceEvent(invoice, 1002, InvoiceEvent.ReceivedPayment) {Payment = payment});
 
-            if (psbtFormat)
+            if (psbtFormat && HexEncoder.IsWellFormed(rawBody))
+            {
+                return Ok(newPsbt.ToHex());
+            }
+            else if (psbtFormat)
+            {
                 return Ok(newPsbt.ToBase64());
+            }
             else
                 return Ok(newTx.ToHex());
+        }
+
+        private uint256 GetExpectedHash(PSBT psbt, Coin[] coins)
+        {
+            psbt = psbt.Clone();
+            psbt.AddCoins(coins);
+            if (!psbt.TryGetFinalizedHash(out var hash))
+                throw new InvalidOperationException("Unable to get the finalized hash");
+            return hash;
         }
 
         private JObject CreatePayjoinError(int httpCode, string errorCode, string friendlyMessage)

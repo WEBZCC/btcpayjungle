@@ -334,18 +334,29 @@ namespace BTCPayServer.Controllers
         public async Task<IActionResult> GenerateNBXWallet(string storeId, string cryptoCode,
             GenerateWalletRequest request)
         {
-            Logs.Events.LogInformation($"GenerateNBXWallet called {storeId}, {cryptoCode}");
             var hotWallet = await CanUseHotWallet();
             if (!hotWallet.HotWallet || (!hotWallet.RPCImport && request.ImportKeysToRPC))
             {
                 return NotFound();
             }
 
-            Logs.Events.LogInformation($"GenerateNBXWallet after CanUseHotWallet");
-
             var network = _NetworkProvider.GetNetwork<BTCPayNetwork>(cryptoCode);
             var client = _ExplorerProvider.GetExplorerClient(cryptoCode);
-            var response = await client.GenerateWalletAsync(request);
+            GenerateWalletResponse response;
+            try
+            {
+                response = await client.GenerateWalletAsync(request);
+            }
+            catch (Exception e)
+            {
+                TempData.SetStatusMessageModel(new StatusMessageModel()
+                {
+                    Severity = StatusMessageModel.StatusSeverity.Error,
+                    Html = $"There was an error generating your wallet: {e.Message}"
+                });
+                return RedirectToAction(nameof(AddDerivationScheme), new {storeId, cryptoCode});
+            }
+            
             if (response == null)
             {
                 TempData.SetStatusMessageModel(new StatusMessageModel()
@@ -355,8 +366,6 @@ namespace BTCPayServer.Controllers
                 });
                 return RedirectToAction(nameof(AddDerivationScheme), new {storeId, cryptoCode});
             }
-
-            Logs.Events.LogInformation($"GenerateNBXWallet after GenerateWalletAsync");
 
             var store = HttpContext.GetStoreData();
             var result = await AddDerivationScheme(storeId,
@@ -394,7 +403,6 @@ namespace BTCPayServer.Controllers
                     Html = "Please check your addresses and confirm"
                 });
             }
-            Logs.Events.LogInformation($"GenerateNBXWallet returning success result");
             return result;
         }
 
