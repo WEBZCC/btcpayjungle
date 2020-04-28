@@ -21,6 +21,7 @@ using Newtonsoft.Json.Linq;
 using NicolasDorier.RateLimits;
 using NBXplorer.DerivationStrategy;
 using System.Diagnostics.CodeAnalysis;
+using BTCPayServer.Data;
 using NBitcoin.DataEncoders;
 
 namespace BTCPayServer.Payments.PayJoin
@@ -86,6 +87,7 @@ namespace BTCPayServer.Payments.PayJoin
         private readonly EventAggregator _eventAggregator;
         private readonly NBXplorerDashboard _dashboard;
         private readonly DelayedTransactionBroadcaster _broadcaster;
+        private readonly WalletRepository _walletRepository;
 
         public PayJoinEndpointController(BTCPayNetworkProvider btcPayNetworkProvider,
             InvoiceRepository invoiceRepository, ExplorerClientProvider explorerClientProvider,
@@ -93,7 +95,8 @@ namespace BTCPayServer.Payments.PayJoin
             PayJoinRepository payJoinRepository,
             EventAggregator eventAggregator,
             NBXplorerDashboard dashboard,
-            DelayedTransactionBroadcaster broadcaster)
+            DelayedTransactionBroadcaster broadcaster,
+            WalletRepository walletRepository)
         {
             _btcPayNetworkProvider = btcPayNetworkProvider;
             _invoiceRepository = invoiceRepository;
@@ -104,6 +107,7 @@ namespace BTCPayServer.Payments.PayJoin
             _eventAggregator = eventAggregator;
             _dashboard = dashboard;
             _broadcaster = broadcaster;
+            _walletRepository = walletRepository;
         }
 
         [HttpPost("")]
@@ -275,8 +279,9 @@ namespace BTCPayServer.Payments.PayJoin
                 var prevOuts = originalTx.Inputs.Select(o => o.PrevOut).ToHashSet();
                 utxos = utxos.Where(u => !prevOuts.Contains(u.Outpoint)).ToArray();
                 Array.Sort(utxos, UTXODeterministicComparer.Instance);
-                foreach (var utxo in await SelectUTXO(network, utxos, output.Value,
-                    psbt.Outputs.Where(o => o.Index != output.Index).Select(o => o.Value).ToArray()))
+                
+                foreach (var utxo in (await SelectUTXO(network, utxos, psbt.Inputs.Select(input => input.WitnessUtxo.Value.ToDecimal(MoneyUnit.BTC)),  output.Value.ToDecimal(MoneyUnit.BTC),
+                    psbt.Outputs.Where(psbtOutput => psbtOutput.Index != output.Index).Select(psbtOutput => psbtOutput.Value.ToDecimal(MoneyUnit.BTC)))).selectedUTXO)
                 {
                     selectedUTXOs.Add(utxo.Outpoint, utxo);
                 }
@@ -307,7 +312,7 @@ namespace BTCPayServer.Payments.PayJoin
             }
 
             var originalPaymentValue = originalPaymentOutput.Value;
-            await _broadcaster.Schedule(DateTimeOffset.UtcNow + TimeSpan.FromMinutes(1.0), originalTx, network);
+            await _broadcaster.Schedule(DateTimeOffset.UtcNow + TimeSpan.FromMinutes(2.0), originalTx, network);
 
             //check if wallet of store is configured to be hot wallet
             var extKeyStr = await explorer.GetMetadataAsync<string>(
@@ -474,7 +479,18 @@ namespace BTCPayServer.Payments.PayJoin
             }
             await _btcPayWalletProvider.GetWallet(network).SaveOffchainTransactionAsync(originalTx);
             _eventAggregator.Publish(new InvoiceEvent(invoice, 1002, InvoiceEvent.ReceivedPayment) {Payment = payment});
-
+            _eventAggregator.Publish(new UpdateTransactionLabel()
+            {
+                WalletId = new WalletId(invoice.StoreId, network.CryptoCode),
+                TransactionLabels = selectedUTXOs.GroupBy(pair => pair.Key.Hash ).Select(utxo =>
+                        new KeyValuePair<uint256, List<(string color, string label)>>(utxo.Key,
+                            new List<(string color, string label)>()
+                            {
+                                UpdateTransactionLabel.PayjoinExposedLabelTemplate(invoice.Id)
+                            }))
+                    .ToDictionary(pair => pair.Key, pair => pair.Value)
+            });
+            
             if (psbtFormat && HexEncoder.IsWellFormed(rawBody))
             {
                 return Ok(newPsbt.ToHex());
@@ -505,41 +521,57 @@ namespace BTCPayServer.Payments.PayJoin
             return o;
         }
 
-        private async Task<UTXO[]> SelectUTXO(BTCPayNetwork network, UTXO[] availableUtxos, Money paymentAmount,
-            Money[] otherOutputs)
+        public enum PayjoinUtxoSelectionType
+        {
+            Unavailable,
+            HeuristicBased,
+            Ordered
+        }
+        [NonAction]
+        public async Task<(UTXO[] selectedUTXO, PayjoinUtxoSelectionType selectionType)> SelectUTXO(BTCPayNetwork network, UTXO[] availableUtxos, IEnumerable<decimal> otherInputs, decimal mainPaymentOutput,
+            IEnumerable<decimal> otherOutputs)
         {
             if (availableUtxos.Length == 0)
-                return Array.Empty<UTXO>();
+                return (Array.Empty<UTXO>(), PayjoinUtxoSelectionType.Unavailable);
             // Assume the merchant wants to get rid of the dust
             HashSet<OutPoint> locked = new HashSet<OutPoint>();   
             // We don't want to make too many db roundtrip which would be inconvenient for the sender
             int maxTries = 30;
             int currentTry = 0;
-            List<UTXO> utxosByPriority = new List<UTXO>();
             // UIH = "unnecessary input heuristic", basically "a wallet wouldn't choose more utxos to spend in this scenario".
             //
             // "UIH1" : one output is smaller than any input. This heuristically implies that that output is not a payment, and must therefore be a change output.
             //
             // "UIH2": one input is larger than any output. This heuristically implies that no output is a payment, or, to say it better, it implies that this is not a normal wallet-created payment, it's something strange/exotic.
             //src: https://gist.github.com/AdamISZ/4551b947789d3216bacfcb7af25e029e#gistcomment-2796539
-
+            
             foreach (var availableUtxo in availableUtxos)
             {
                 if (currentTry >= maxTries)
                     break;
-                //we can only check against our input as we dont know the value of the rest.
-                var input = (Money)availableUtxo.Value;
-                var paymentAmountSum = input + paymentAmount;
-                if (otherOutputs.Concat(new[] {paymentAmountSum}).Any(output => input > output))
+
+                var invalid = false;
+                foreach (var input in otherInputs.Concat(new[] {availableUtxo.Value.GetValue(network)}))
                 {
-                    //UIH 1 & 2
-                    continue;
+                    var computedOutputs =
+                        otherOutputs.Concat(new[] {mainPaymentOutput + availableUtxo.Value.GetValue(network)});
+                    if (computedOutputs.Any(output => input > output))
+                    {
+                        //UIH 1 & 2
+                        invalid = true;
+                        break;
+                    }
                 }
 
+                if (invalid)
+                {
+                    continue;
+                }
                 if (await _payJoinRepository.TryLock(availableUtxo.Outpoint))
                 {
-                    return new UTXO[] { availableUtxo };
+                    return (new[] {availableUtxo}, PayjoinUtxoSelectionType.HeuristicBased);
                 }
+
                 locked.Add(availableUtxo.Outpoint);
                 currentTry++;
             }
@@ -549,11 +581,11 @@ namespace BTCPayServer.Payments.PayJoin
                     break;
                 if (await _payJoinRepository.TryLock(utxo.Outpoint))
                 {
-                    return new UTXO[] { utxo };
+                    return (new[] {utxo}, PayjoinUtxoSelectionType.Ordered);
                 }
                 currentTry++;
             }
-            return Array.Empty<UTXO>();
+            return (Array.Empty<UTXO>(), PayjoinUtxoSelectionType.Unavailable);
         }
     }
 }

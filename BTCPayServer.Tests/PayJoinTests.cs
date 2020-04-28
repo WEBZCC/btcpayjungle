@@ -18,6 +18,7 @@ using BTCPayServer.Services;
 using BTCPayServer.Services.Invoices;
 using BTCPayServer.Services.Wallets;
 using BTCPayServer.Tests.Logging;
+using BTCPayServer.Views.Wallets;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -26,6 +27,7 @@ using NBitcoin;
 using NBitcoin.Altcoins;
 using NBitcoin.Payment;
 using NBitpayClient;
+using NBXplorer.Models;
 using OpenQA.Selenium;
 using Xunit;
 using Xunit.Abstractions;
@@ -90,12 +92,60 @@ namespace BTCPayServer.Tests
             }
         }
 
+        [Fact]
+        [Trait("Integration", "Integration")]
+        public async Task ChooseBestUTXOsForPayjoin()
+        {
+            using (var tester = ServerTester.Create())
+            {
+                await tester.StartAsync();
+                var network = tester.NetworkProvider.GetNetwork<BTCPayNetwork>("BTC");
+                var controller = tester.PayTester.GetService<PayJoinEndpointController>();
+
+                //Only one utxo, so obvious result
+                var utxos = new[] {FakeUTXO(1.0m)};
+                var paymentAmount = 0.5m;
+                var otherOutputs = new[] {0.5m};
+                var inputs = new[] {1m};
+                var result = await controller.SelectUTXO(network, utxos, inputs, paymentAmount, otherOutputs);
+                Assert.Equal(PayJoinEndpointController.PayjoinUtxoSelectionType.Ordered, result.selectionType);
+                Assert.Contains( result.selectedUTXO, utxo => utxos.Contains(utxo));
+                
+                //no matter what here, no good selection, it seems that payment with 1 utxo generally makes payjoin coin selection unperformant
+                utxos = new[] {FakeUTXO(0.3m),FakeUTXO(0.7m)};
+                paymentAmount = 0.5m;
+                otherOutputs = new[] {0.5m};
+                inputs = new[] {1m};
+                result = await controller.SelectUTXO(network, utxos, inputs, paymentAmount, otherOutputs);
+                Assert.Equal(PayJoinEndpointController.PayjoinUtxoSelectionType.Ordered, result.selectionType);
+                
+                //when there is no change, anything works
+                utxos = new[] {FakeUTXO(1),FakeUTXO(0.1m),FakeUTXO(0.001m),FakeUTXO(0.003m)};
+                paymentAmount = 0.5m;
+                otherOutputs = new decimal[0];
+                inputs = new[] {0.03m, 0.07m};
+                result = await controller.SelectUTXO(network, utxos, inputs, paymentAmount, otherOutputs);
+                Assert.Equal(PayJoinEndpointController.PayjoinUtxoSelectionType.HeuristicBased, result.selectionType);
+            }
+        }
+        
+        
+
         private Transaction RandomTransaction(BTCPayNetwork network)
         {
             var tx = network.NBitcoinNetwork.CreateTransaction();
             tx.Inputs.Add(new OutPoint(RandomUtils.GetUInt256(), 0), Script.Empty);
             tx.Outputs.Add(Money.Coins(1.0m), new Key().ScriptPubKey);
             return tx;
+        }
+
+        private UTXO FakeUTXO(decimal amount)
+        {
+            return new UTXO()
+            {
+                Value = new Money(amount, MoneyUnit.BTC),
+                Outpoint = RandomOutpoint()
+            };
         }
 
         private OutPoint RandomOutpoint()
@@ -209,7 +259,7 @@ namespace BTCPayServer.Tests
                         .GetAttribute("href");
                     Assert.Contains($"{PayjoinClient.BIP21EndpointKey}=", bip21);
 
-                    s.GoToWalletSend(senderWalletId);
+                    s.GoToWallet(senderWalletId, WalletsNavPages.Send);
                     s.Driver.FindElement(By.Id("bip21parse")).Click();
                     s.Driver.SwitchTo().Alert().SendKeys(bip21);
                     s.Driver.SwitchTo().Alert().Accept();
@@ -244,7 +294,7 @@ namespace BTCPayServer.Tests
                         .GetAttribute("href");
                     Assert.Contains($"{PayjoinClient.BIP21EndpointKey}", bip21);
 
-                    s.GoToWalletSend(senderWalletId);
+                    s.GoToWallet(senderWalletId, WalletsNavPages.Send);
                     s.Driver.FindElement(By.Id("bip21parse")).Click();
                     s.Driver.SwitchTo().Alert().SendKeys(bip21);
                     s.Driver.SwitchTo().Alert().Accept();
@@ -255,7 +305,7 @@ namespace BTCPayServer.Tests
                     s.Driver.ScrollTo(By.Id("SendMenu"));
                     s.Driver.FindElement(By.Id("SendMenu")).ForceClick();
                     s.Driver.FindElement(By.CssSelector("button[value=nbx-seed]")).Click();
-                    await s.Server.WaitForEvent<NewOnChainTransactionEvent>(() =>
+                    var txId = await s.Server.WaitForEvent<NewOnChainTransactionEvent>(() =>
                     {
                         s.Driver.FindElement(By.CssSelector("button[value=payjoin]")).ForceClick();
                         return Task.CompletedTask;
@@ -295,6 +345,15 @@ namespace BTCPayServer.Tests
                         .FindElement(By.ClassName("payment-value"));
                     Assert.False(paymentValueRowColumn.Text.Contains("payjoin",
                         StringComparison.InvariantCultureIgnoreCase));
+                    
+                    TestUtils.Eventually(() =>
+                    {
+                        s.GoToWallet(receiverWalletId, WalletsNavPages.Transactions);
+                        Assert.Contains(invoiceId, s.Driver.PageSource);
+                        Assert.Contains("payjoin", s.Driver.PageSource);
+                        //this label does not always show since input gets used
+                        // Assert.Contains("payjoin-exposed", s.Driver.PageSource);
+                    });
                 }
             }
         }
