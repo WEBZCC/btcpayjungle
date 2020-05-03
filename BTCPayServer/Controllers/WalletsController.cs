@@ -285,7 +285,7 @@ namespace BTCPayServer.Controllers
                         vm.Id);
                     vm.Timestamp = tx.Timestamp;
                     vm.Positive = tx.BalanceChange.GetValue(wallet.Network) >= 0;
-                    vm.Balance = tx.BalanceChange.ToString();
+                    vm.Balance = tx.BalanceChange.ShowMoney(wallet.Network);
                     vm.IsConfirmed = tx.Confirmations != 0;
 
                     if (walletTransactionsInfo.TryGetValue(tx.TransactionId.ToString(), out var transactionInfo))
@@ -996,7 +996,8 @@ namespace BTCPayServer.Controllers
             {
                 try
                 {
-                    return (await wallet.GetBalance(derivationStrategy, cts.Token)).ToString(CultureInfo.InvariantCulture);
+                    return (await wallet.GetBalance(derivationStrategy, cts.Token)).ShowMoney(wallet.Network
+                        .Divisibility);
                 }
                 catch
                 {
@@ -1137,7 +1138,10 @@ namespace BTCPayServer.Controllers
                 Label = derivationSchemeSettings.Label,
                 DerivationScheme = derivationSchemeSettings.AccountDerivation.ToString(),
                 DerivationSchemeInput = derivationSchemeSettings.AccountOriginal,
-                SelectedSigningKey = derivationSchemeSettings.SigningKey.ToString()
+                SelectedSigningKey = derivationSchemeSettings.SigningKey.ToString(),
+                NBXSeedAvailable = await CanUseHotWallet() && !string.IsNullOrEmpty(await ExplorerClientProvider.GetExplorerClient(walletId.CryptoCode)
+                    .GetMetadataAsync<string>(GetDerivationSchemeSettings(walletId).AccountDerivation,
+                        WellknownMetadataKeys.MasterHDKey))
             };
             vm.AccountKeys = derivationSchemeSettings.AccountKeySettings
                             .Select(e => new WalletSettingsAccountKeyViewModel()
@@ -1152,8 +1156,9 @@ namespace BTCPayServer.Controllers
         [Route("{walletId}/settings")]
         [HttpPost]
         public async Task<IActionResult> WalletSettings(
-             [ModelBinder(typeof(WalletIdModelBinder))]
-            WalletId walletId, WalletSettingsViewModel vm, string command = "save", CancellationToken cancellationToken = default)
+            [ModelBinder(typeof(WalletIdModelBinder))]
+            WalletId walletId, WalletSettingsViewModel vm, string command = "save",
+            CancellationToken cancellationToken = default)
         {
             if (!ModelState.IsValid)
                 return View(vm);
@@ -1164,14 +1169,21 @@ namespace BTCPayServer.Controllers
             if (command == "save")
             {
                 derivationScheme.Label = vm.Label;
-                derivationScheme.SigningKey = string.IsNullOrEmpty(vm.SelectedSigningKey) ? null : new BitcoinExtPubKey(vm.SelectedSigningKey, derivationScheme.Network.NBitcoinNetwork);
+                derivationScheme.SigningKey = string.IsNullOrEmpty(vm.SelectedSigningKey)
+                    ? null
+                    : new BitcoinExtPubKey(vm.SelectedSigningKey, derivationScheme.Network.NBitcoinNetwork);
                 for (int i = 0; i < derivationScheme.AccountKeySettings.Length; i++)
                 {
-                    derivationScheme.AccountKeySettings[i].AccountKeyPath = string.IsNullOrWhiteSpace(vm.AccountKeys[i].AccountKeyPath) ? null
-                                                              : new KeyPath(vm.AccountKeys[i].AccountKeyPath);
-                    derivationScheme.AccountKeySettings[i].RootFingerprint = string.IsNullOrWhiteSpace(vm.AccountKeys[i].MasterFingerprint) ? (HDFingerprint?)null
-                                                              : new HDFingerprint(Encoders.Hex.DecodeData(vm.AccountKeys[i].MasterFingerprint));
+                    derivationScheme.AccountKeySettings[i].AccountKeyPath =
+                        string.IsNullOrWhiteSpace(vm.AccountKeys[i].AccountKeyPath)
+                            ? null
+                            : new KeyPath(vm.AccountKeys[i].AccountKeyPath);
+                    derivationScheme.AccountKeySettings[i].RootFingerprint =
+                        string.IsNullOrWhiteSpace(vm.AccountKeys[i].MasterFingerprint)
+                            ? (HDFingerprint?)null
+                            : new HDFingerprint(Encoders.Hex.DecodeData(vm.AccountKeys[i].MasterFingerprint));
                 }
+
                 var store = (await Repository.FindStore(walletId.StoreId, GetUserId()));
                 store.SetSupportedPaymentMethod(derivationScheme);
                 await Repository.UpdateStore(store);
@@ -1180,15 +1192,41 @@ namespace BTCPayServer.Controllers
             }
             else if (command == "prune")
             {
-                var result = await ExplorerClientProvider.GetExplorerClient(walletId.CryptoCode).PruneAsync(derivationScheme.AccountDerivation, new PruneRequest(),  cancellationToken);
+                var result = await ExplorerClientProvider.GetExplorerClient(walletId.CryptoCode)
+                    .PruneAsync(derivationScheme.AccountDerivation, new PruneRequest(), cancellationToken);
                 if (result.TotalPruned == 0)
                 {
                     TempData[WellKnownTempData.SuccessMessage] = $"The wallet is already pruned";
                 }
                 else
                 {
-                    TempData[WellKnownTempData.SuccessMessage] = $"The wallet has been successfully pruned ({result.TotalPruned} transactions have been removed from the history)";
+                    TempData[WellKnownTempData.SuccessMessage] =
+                        $"The wallet has been successfully pruned ({result.TotalPruned} transactions have been removed from the history)";
                 }
+
+                return RedirectToAction(nameof(WalletSettings));
+            }
+            else if (command == "view-seed" && await CanUseHotWallet())
+            {
+                var seed =  await ExplorerClientProvider.GetExplorerClient(walletId.CryptoCode)
+                    .GetMetadataAsync<string>(derivationScheme.AccountDerivation,
+                        WellknownMetadataKeys.Mnemonic, cancellationToken);
+                if (string.IsNullOrEmpty(seed))
+                {
+                    TempData.SetStatusMessageModel(new StatusMessageModel()
+                    {
+                        Severity = StatusMessageModel.StatusSeverity.Error, Message = "The seed was not found"
+                    });
+                }
+                else
+                {
+                    TempData.SetStatusMessageModel(new StatusMessageModel()
+                    {
+                        Severity = StatusMessageModel.StatusSeverity.Success,
+                        Html = $"Please store your seed securely! <br/><code class=\"alert-link\">{seed}</code>"
+                    });
+                }
+                
                 return RedirectToAction(nameof(WalletSettings));
             }
             else
@@ -1196,8 +1234,6 @@ namespace BTCPayServer.Controllers
                 return NotFound();
             }
         }
-        
-
 
         private string GetImage(PaymentMethodId paymentMethodId, BTCPayNetwork network)
         {
