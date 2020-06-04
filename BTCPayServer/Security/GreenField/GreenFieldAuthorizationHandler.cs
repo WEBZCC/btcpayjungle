@@ -36,14 +36,7 @@ namespace BTCPayServer.Security.GreenField
             bool success = false;
             switch (requirement.Policy)
             {
-                case Policies.CanModifyProfile:
-                case Policies.CanViewProfile:
-                case Policies.Unrestricted:
-                    success = context.HasPermission(Permission.Create(requirement.Policy));
-                    break;
-
-                case Policies.CanViewStoreSettings:
-                case Policies.CanModifyStoreSettings:
+                case { } policy when Policies.IsStorePolicy(policy):
                     var storeId = _HttpContext.GetImplicitStoreId();
                     var userid = _userManager.GetUserId(context.User);
                     // Specific store action
@@ -73,8 +66,7 @@ namespace BTCPayServer.Security.GreenField
                         success = true;
                     }
                     break;
-                case Policies.CanCreateUser:
-                case Policies.CanModifyServerSettings:
+                case { } policy when Policies.IsServerPolicy(policy):
                     if (context.HasPermission(Permission.Create(requirement.Policy)))
                     {
                         var user = await _userManager.GetUserAsync(context.User);
@@ -84,6 +76,11 @@ namespace BTCPayServer.Security.GreenField
                             break;
                         success = true;
                     }
+                    break;
+                case Policies.CanModifyProfile:
+                case Policies.CanViewProfile:
+                case Policies.Unrestricted:
+                    success = context.HasPermission(Permission.Create(requirement.Policy));
                     break;
             }
 

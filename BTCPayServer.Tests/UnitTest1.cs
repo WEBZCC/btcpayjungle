@@ -63,6 +63,7 @@ using BTCPayServer.Security.Bitpay;
 using MemoryCache = Microsoft.Extensions.Caching.Memory.MemoryCache;
 using Newtonsoft.Json.Schema;
 using BTCPayServer.Client;
+using BTCPayServer.Client.Models;
 
 namespace BTCPayServer.Tests
 {
@@ -101,9 +102,13 @@ namespace BTCPayServer.Tests
             using (var tester = ServerTester.Create())
             {
                 await tester.StartAsync();
-                var sresp = await tester.PayTester.HttpClient.GetAsync("swagger/v1/swagger.json");
+                var acc = tester.NewAccount();
 
-                JObject swagger = JObject.Parse(await sresp.Content.ReadAsStringAsync());
+                var sresp = Assert
+                    .IsType<JsonResult>(await tester.PayTester.GetController<HomeController>(acc.UserId, acc.StoreId)
+                        .Swagger()).Value.ToJson();
+
+                JObject swagger = JObject.Parse(sresp);
                 using HttpClient client = new HttpClient();
                 var resp = await client.GetAsync(
                     "https://raw.githubusercontent.com/OAI/OpenAPI-Specification/master/schemas/v3.0/schema.json");
@@ -627,7 +632,7 @@ namespace BTCPayServer.Tests
                 (1000.0001m, "₹ 1,000.00 (INR)", "INR")
             })
             {
-                var actual = new CurrencyNameTable().DisplayFormatCurrency(test.Item1, test.Item3);
+                var actual = CurrencyNameTable.Instance.DisplayFormatCurrency(test.Item1, test.Item3);
                 actual = actual.Replace("￥", "¥"); // Hack so JPY test pass on linux as well
                 Assert.Equal(test.Item2, actual);
             }
@@ -1904,6 +1909,20 @@ namespace BTCPayServer.Tests
                 Assert.Empty(invoice.CryptoInfo.Where(c => c.CryptoCode == "LTC"));
             }
         }
+        
+        [Fact]
+        [Trait("Fast", "Fast")]
+        public void HasCurrencyDataForNetworks()
+        {
+            var btcPayNetworkProvider = new BTCPayNetworkProvider(NetworkType.Regtest);
+            foreach (var network in btcPayNetworkProvider.GetAll())
+            {
+                var cd = CurrencyNameTable.Instance.GetCurrencyData(network.CryptoCode, false);
+                Assert.NotNull(cd);
+                Assert.Equal(network.Divisibility, cd.Divisibility);
+                Assert.True(cd.Crypto);
+            }
+        }
 
         [Fact]
         [Trait("Fast", "Fast")]
@@ -2116,7 +2135,7 @@ namespace BTCPayServer.Tests
                     .IsType<ViewResult>(await controller.AddDerivationScheme(user.StoreId, "BTC")).Model;
                 string content =
                     "{\"keystore\": {\"ckcc_xpub\": \"xpub661MyMwAqRbcGVBsTGeNZN6QGVHmMHLdSA4FteGsRrEriu4pnVZMZWnruFFFXkMnyoBjyHndD3Qwcfz4MPzBUxjSevweNFQx7SAYZATtcDw\", \"xpub\": \"ypub6WWc2gWwHbdnAAyJDnR4SPL1phRh7REqrPBfZeizaQ1EmTshieRXJC3Z5YoU4wkcdKHEjQGkh6AYEzCQC1Kz3DNaWSwdc1pc8416hAjzqyD\", \"label\": \"Coldcard Import 0x60d1af8b\", \"ckcc_xfp\": 1624354699, \"type\": \"hardware\", \"hw_type\": \"coldcard\", \"derivation\": \"m/49'/0'/0'\"}, \"wallet_type\": \"standard\", \"use_encryption\": false, \"seed_version\": 17}";
-                derivationVM.ColdcardPublicFile = TestUtils.GetFormFile("wallet.json", content);
+                derivationVM.ElectrumWalletFile = TestUtils.GetFormFile("wallet.json", content);
                 derivationVM = (DerivationSchemeViewModel)Assert.IsType<ViewResult>(controller
                     .AddDerivationScheme(user.StoreId, derivationVM, "BTC").GetAwaiter().GetResult()).Model;
                 Assert.False(derivationVM
@@ -2127,7 +2146,7 @@ namespace BTCPayServer.Tests
                     "{\"keystore\": {\"ckcc_xpub\": \"tpubD6NzVbkrYhZ4YHNiuTdTmHRmbcPRLfqgyneZFCL1mkzkUBjXriQShxTh9HL34FK2mhieasJVk9EzJrUfkFqRNQBjiXgx3n5BhPkxKBoFmaS\", \"xpub\": \"upub5DBYp1qGgsTrkzCptMGZc2x18pquLwGrBw6nS59T4NViZ4cni1mGowQzziy85K8vzkp1jVtWrSkLhqk9KDfvrGeB369wGNYf39kX8rQfiLn\", \"label\": \"Coldcard Import 0x60d1af8b\", \"ckcc_xfp\": 1624354699, \"type\": \"hardware\", \"hw_type\": \"coldcard\", \"derivation\": \"m/49'/0'/0'\"}, \"wallet_type\": \"standard\", \"use_encryption\": false, \"seed_version\": 17}";
                 derivationVM = (DerivationSchemeViewModel)Assert
                     .IsType<ViewResult>(await controller.AddDerivationScheme(user.StoreId, "BTC")).Model;
-                derivationVM.ColdcardPublicFile = TestUtils.GetFormFile("wallet2.json", content);
+                derivationVM.ElectrumWalletFile = TestUtils.GetFormFile("wallet2.json", content);
                 derivationVM.Enabled = true;
                 derivationVM = (DerivationSchemeViewModel)Assert.IsType<ViewResult>(controller
                     .AddDerivationScheme(user.StoreId, derivationVM, "BTC").GetAwaiter().GetResult()).Model;
@@ -2139,7 +2158,7 @@ namespace BTCPayServer.Tests
                 var store = tester.PayTester.StoreRepository.FindStore(user.StoreId).GetAwaiter().GetResult();
                 var onchainBTC = store.GetSupportedPaymentMethods(tester.PayTester.Networks)
                     .OfType<DerivationSchemeSettings>().First(o => o.PaymentId.IsBTCOnChain);
-                DerivationSchemeSettings.TryParseFromColdcard(content, onchainBTC.Network, out var expected);
+                DerivationSchemeSettings.TryParseFromElectrumWallet(content, onchainBTC.Network, out var expected);
                 Assert.Equal(expected.ToJson(), onchainBTC.ToJson());
 
                 // Let's check that the root hdkey and account key path are taken into account when making a PSBT
@@ -2265,14 +2284,17 @@ namespace BTCPayServer.Tests
 
         [Fact]
         [Trait("Integration", "Integration")]
+        [Trait("Altcoins", "Altcoins")]
         public async Task CanUsePoSApp()
         {
             using (var tester = ServerTester.Create())
             {
+                tester.ActivateLTC();
                 await tester.StartAsync();
                 var user = tester.NewAccount();
                 user.GrantAccess();
                 user.RegisterDerivationScheme("BTC");
+                user.RegisterDerivationScheme("LTC");
                 var apps = user.GetController<AppsController>();
                 var vm = Assert.IsType<CreateAppViewModel>(Assert.IsType<ViewResult>(apps.CreateApp().Result).Model);
                 vm.Name = "test";
@@ -2306,7 +2328,7 @@ donation:
                 var publicApps = user.GetController<AppsPublicController>();
                 var vmview =
                     Assert.IsType<ViewPointOfSaleViewModel>(Assert
-                        .IsType<ViewResult>(publicApps.ViewPointOfSale(appId).Result).Model);
+                        .IsType<ViewResult>(publicApps.ViewPointOfSale(appId, PosViewType.Cart).Result).Model);
                 Assert.Equal("hello", vmview.Title);
                 Assert.Equal(3, vmview.Items.Length);
                 Assert.Equal("good apple", vmview.Items[0].Title);
@@ -2318,7 +2340,7 @@ donation:
                 Assert.Equal("Wanna tip?", vmview.CustomTipText);
                 Assert.Equal("15,18,20", string.Join(',', vmview.CustomTipPercentages));
                 Assert.IsType<RedirectToActionResult>(publicApps
-                    .ViewPointOfSale(appId, 0, null, null, null, null, "orange").Result);
+                    .ViewPointOfSale(appId, PosViewType.Cart, 0, null, null, null, null, "orange").Result);
 
                 //
                 var invoices = user.BitPay.GetInvoices();
@@ -2329,7 +2351,7 @@ donation:
 
 
                 Assert.IsType<RedirectToActionResult>(publicApps
-                    .ViewPointOfSale(appId, 0, null, null, null, null, "apple").Result);
+                    .ViewPointOfSale(appId, PosViewType.Cart, 0, null, null, null, null, "apple").Result);
 
                 invoices = user.BitPay.GetInvoices();
                 var appleInvoice = invoices.SingleOrDefault(invoice => invoice.ItemCode.Equals("apple"));
@@ -2339,7 +2361,7 @@ donation:
 
                 // testing custom amount
                 var action = Assert.IsType<RedirectToActionResult>(publicApps
-                    .ViewPointOfSale(appId, 6.6m, null, null, null, null, "donation").Result);
+                    .ViewPointOfSale(appId, PosViewType.Cart, 6.6m, null, null, null, null, "donation").Result);
                 Assert.Equal(nameof(InvoiceController.Checkout), action.ActionName);
                 invoices = user.BitPay.GetInvoices();
                 var donationInvoice = invoices.Single(i => i.Price == 6.6m);
@@ -2355,7 +2377,7 @@ donation:
                         ExpectedThousandSeparator: ",", ExpectedPrefixed: true, ExpectedSymbolSpace: true),
                     (Code: "JPY", ExpectedSymbol: "¥", ExpectedDecimalSeparator: ".", ExpectedDivisibility: 0,
                         ExpectedThousandSeparator: ",", ExpectedPrefixed: true, ExpectedSymbolSpace: false),
-                    (Code: "BTC", ExpectedSymbol: "BTC", ExpectedDecimalSeparator: ".", ExpectedDivisibility: 8,
+                    (Code: "BTC", ExpectedSymbol: "₿", ExpectedDecimalSeparator: ".", ExpectedDivisibility: 8,
                         ExpectedThousandSeparator: ",", ExpectedPrefixed: false, ExpectedSymbolSpace: true),
                 })
                 {
@@ -2380,7 +2402,7 @@ donation:
                     Assert.IsType<RedirectToActionResult>(apps.UpdatePointOfSale(appId, vmpos).Result);
                     publicApps = user.GetController<AppsPublicController>();
                     vmview = Assert.IsType<ViewPointOfSaleViewModel>(Assert
-                        .IsType<ViewResult>(publicApps.ViewPointOfSale(appId).Result).Model);
+                        .IsType<ViewResult>(publicApps.ViewPointOfSale(appId, PosViewType.Cart).Result).Model);
                     Assert.Equal(test.Code, vmview.CurrencyCode);
                     Assert.Equal(test.ExpectedSymbol,
                         vmview.CurrencySymbol.Replace("￥", "¥")); // Hack so JPY test pass on linux as well);
@@ -2411,17 +2433,17 @@ noninventoryitem:
 
                 //inventoryitem has 1 item available
                 Assert.IsType<RedirectToActionResult>(publicApps
-                    .ViewPointOfSale(appId, 1, null, null, null, null, "inventoryitem").Result);
+                    .ViewPointOfSale(appId, PosViewType.Cart, 1, null, null, null, null, "inventoryitem").Result);
                 //we already bought all available stock so this should fail
                 await Task.Delay(100);
                 Assert.IsType<RedirectToActionResult>(publicApps
-                    .ViewPointOfSale(appId, 1, null, null, null, null, "inventoryitem").Result);
+                    .ViewPointOfSale(appId, PosViewType.Cart, 1, null, null, null, null, "inventoryitem").Result);
 
                 //inventoryitem has unlimited items available
                 Assert.IsType<RedirectToActionResult>(publicApps
-                    .ViewPointOfSale(appId, 1, null, null, null, null, "noninventoryitem").Result);
+                    .ViewPointOfSale(appId, PosViewType.Cart, 1, null, null, null, null, "noninventoryitem").Result);
                 Assert.IsType<RedirectToActionResult>(publicApps
-                    .ViewPointOfSale(appId, 1, null, null, null, null, "noninventoryitem").Result);
+                    .ViewPointOfSale(appId, PosViewType.Cart, 1, null, null, null, null, "noninventoryitem").Result);
 
                 //verify invoices where created
                 invoices = user.BitPay.GetInvoices();
@@ -2443,6 +2465,41 @@ noninventoryitem:
                     Assert.Equal(1,
                         appService.Parse(vmpos.Template, "BTC").Single(item => item.Id == "inventoryitem").Inventory);
                 }, 10000);
+
+
+                //test payment methods option
+                
+                vmpos = Assert.IsType<UpdatePointOfSaleViewModel>(Assert
+                    .IsType<ViewResult>(apps.UpdatePointOfSale(appId).Result).Model);
+                vmpos.Title = "hello";
+                vmpos.Currency = "BTC";
+                vmpos.Template = @"
+btconly:
+  price: 1.0
+  title: good apple
+  payment_methods:
+    - BTC
+normal:
+  price: 1.0";
+                Assert.IsType<RedirectToActionResult>(apps.UpdatePointOfSale(appId, vmpos).Result);
+                Assert.IsType<RedirectToActionResult>(publicApps
+                    .ViewPointOfSale(appId, PosViewType.Cart, 1, null, null, null, null, "btconly").Result);
+                Assert.IsType<RedirectToActionResult>(publicApps
+                    .ViewPointOfSale(appId, PosViewType.Cart, 1, null, null, null, null, "normal").Result);
+                invoices = user.BitPay.GetInvoices();
+                var normalInvoice = invoices.Single(invoice => invoice.ItemCode == "normal");
+                var btcOnlyInvoice = invoices.Single(invoice => invoice.ItemCode == "btconly");
+                Assert.Single(btcOnlyInvoice.CryptoInfo);
+                Assert.Equal("BTC",
+                    btcOnlyInvoice.CryptoInfo.First().CryptoCode);
+                Assert.Equal(PaymentTypes.BTCLike.ToString(),
+                    btcOnlyInvoice.CryptoInfo.First().PaymentType);
+
+                Assert.Equal(2, normalInvoice.CryptoInfo.Length);
+                Assert.Contains(
+                    normalInvoice.CryptoInfo,
+                    s => PaymentTypes.BTCLike.ToString() == s.PaymentType &&  new[] {"BTC", "LTC"}.Contains(
+                             s.CryptoCode));
             }
         }
 
@@ -3405,7 +3462,7 @@ noninventoryitem:
             var root = new Mnemonic(
                     "usage fever hen zero slide mammal silent heavy donate budget pulse say brain thank sausage brand craft about save attract muffin advance illegal cabbage")
                 .DeriveExtKey();
-            Assert.True(DerivationSchemeSettings.TryParseFromColdcard(
+            Assert.True(DerivationSchemeSettings.TryParseFromElectrumWallet(
                 "{\"keystore\": {\"ckcc_xpub\": \"xpub661MyMwAqRbcGVBsTGeNZN6QGVHmMHLdSA4FteGsRrEriu4pnVZMZWnruFFFXkMnyoBjyHndD3Qwcfz4MPzBUxjSevweNFQx7SAYZATtcDw\", \"xpub\": \"ypub6WWc2gWwHbdnAAyJDnR4SPL1phRh7REqrPBfZeizaQ1EmTshieRXJC3Z5YoU4wkcdKHEjQGkh6AYEzCQC1Kz3DNaWSwdc1pc8416hAjzqyD\", \"label\": \"Coldcard Import 0x60d1af8b\", \"ckcc_xfp\": 1624354699, \"type\": \"hardware\", \"hw_type\": \"coldcard\", \"derivation\": \"m/49'/0'/0'\"}, \"wallet_type\": \"standard\", \"use_encryption\": false, \"seed_version\": 17}",
                 mainnet, out var settings));
             Assert.Equal(root.GetPublicKey().GetHDFingerPrint(), settings.AccountKeySettings[0].RootFingerprint);
@@ -3422,20 +3479,20 @@ noninventoryitem:
             var testnet = new BTCPayNetworkProvider(NetworkType.Testnet).GetNetwork<BTCPayNetwork>("BTC");
 
             // Should be legacy
-            Assert.True(DerivationSchemeSettings.TryParseFromColdcard(
+            Assert.True(DerivationSchemeSettings.TryParseFromElectrumWallet(
                 "{\"keystore\": {\"ckcc_xpub\": \"tpubD6NzVbkrYhZ4YHNiuTdTmHRmbcPRLfqgyneZFCL1mkzkUBjXriQShxTh9HL34FK2mhieasJVk9EzJrUfkFqRNQBjiXgx3n5BhPkxKBoFmaS\", \"xpub\": \"tpubDDWYqT3P24znfsaGX7kZcQhNc5LAjnQiKQvUCHF2jS6dsgJBRtymopEU5uGpMaR5YChjuiExZG1X2aTbqXkp82KqH5qnqwWHp6EWis9ZvKr\", \"label\": \"Coldcard Import 0x60d1af8b\", \"ckcc_xfp\": 1624354699, \"type\": \"hardware\", \"hw_type\": \"coldcard\", \"derivation\": \"m/44'/1'/0'\"}, \"wallet_type\": \"standard\", \"use_encryption\": false, \"seed_version\": 17}",
                 testnet, out settings));
             Assert.True(settings.AccountDerivation is DirectDerivationStrategy s && !s.Segwit);
 
             // Should be segwit p2sh
-            Assert.True(DerivationSchemeSettings.TryParseFromColdcard(
+            Assert.True(DerivationSchemeSettings.TryParseFromElectrumWallet(
                 "{\"keystore\": {\"ckcc_xpub\": \"tpubD6NzVbkrYhZ4YHNiuTdTmHRmbcPRLfqgyneZFCL1mkzkUBjXriQShxTh9HL34FK2mhieasJVk9EzJrUfkFqRNQBjiXgx3n5BhPkxKBoFmaS\", \"xpub\": \"upub5DSddA9NoRUyJrQ4p86nsCiTSY7kLHrSxx3joEJXjHd4HPARhdXUATuk585FdWPVC2GdjsMePHb6BMDmf7c6KG4K4RPX6LVqBLtDcWpQJmh\", \"label\": \"Coldcard Import 0x60d1af8b\", \"ckcc_xfp\": 1624354699, \"type\": \"hardware\", \"hw_type\": \"coldcard\", \"derivation\": \"m/49'/1'/0'\"}, \"wallet_type\": \"standard\", \"use_encryption\": false, \"seed_version\": 17}",
                 testnet, out settings));
             Assert.True(settings.AccountDerivation is P2SHDerivationStrategy p &&
                         p.Inner is DirectDerivationStrategy s2 && s2.Segwit);
 
             // Should be segwit
-            Assert.True(DerivationSchemeSettings.TryParseFromColdcard(
+            Assert.True(DerivationSchemeSettings.TryParseFromElectrumWallet(
                 "{\"keystore\": {\"ckcc_xpub\": \"tpubD6NzVbkrYhZ4YHNiuTdTmHRmbcPRLfqgyneZFCL1mkzkUBjXriQShxTh9HL34FK2mhieasJVk9EzJrUfkFqRNQBjiXgx3n5BhPkxKBoFmaS\", \"xpub\": \"vpub5YjYxTemJ39tFRnuAhwduyxG2tKGjoEpmvqVQRPqdYrqa6YGoeSzBtHXaJUYB19zDbXs3JjbEcVWERjQBPf9bEfUUMZNMv1QnMyHV8JPqyf\", \"label\": \"Coldcard Import 0x60d1af8b\", \"ckcc_xfp\": 1624354699, \"type\": \"hardware\", \"hw_type\": \"coldcard\", \"derivation\": \"m/84'/1'/0'\"}, \"wallet_type\": \"standard\", \"use_encryption\": false, \"seed_version\": 17}",
                 testnet, out settings));
             Assert.True(settings.AccountDerivation is DirectDerivationStrategy s3 && s3.Segwit);

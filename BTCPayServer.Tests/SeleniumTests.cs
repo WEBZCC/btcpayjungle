@@ -15,6 +15,8 @@ using BTCPayServer.Controllers;
 using BTCPayServer.Data;
 using BTCPayServer.Services.Wallets;
 using BTCPayServer.Views.Wallets;
+using Newtonsoft.Json;
+using BTCPayServer.Client.Models;
 
 namespace BTCPayServer.Tests
 {
@@ -240,10 +242,26 @@ namespace BTCPayServer.Tests
                 var storeUrl = s.Driver.Url;
                 s.ClickOnAllSideMenus();
                 s.GoToInvoices();
-                s.CreateInvoice(store);
+                var invoiceId = s.CreateInvoice(store);
                 s.AssertHappyMessage();
                 s.Driver.FindElement(By.ClassName("invoice-details-link")).Click();
                 var invoiceUrl = s.Driver.Url;
+                
+                //let's test archiving an invoice
+                Assert.DoesNotContain("Archived", s.Driver.FindElement(By.Id("btn-archive-toggle")).Text);    
+                s.Driver.FindElement(By.Id("btn-archive-toggle")).Click();
+                s.AssertHappyMessage();
+                Assert.Contains("Archived", s.Driver.FindElement(By.Id("btn-archive-toggle")).Text);    
+                //check that it no longer appears in list
+                s.GoToInvoices();
+                Assert.DoesNotContain(invoiceId, s.Driver.PageSource);
+                //ok, let's unarchive and see that it shows again
+                s.Driver.Navigate().GoToUrl(invoiceUrl);
+                s.Driver.FindElement(By.Id("btn-archive-toggle")).Click();
+                s.AssertHappyMessage();
+                Assert.DoesNotContain("Archived", s.Driver.FindElement(By.Id("btn-archive-toggle")).Text);  
+                s.GoToInvoices();
+                Assert.Contains(invoiceId, s.Driver.PageSource);
 
                 // When logout we should not be able to access store and invoice details
                 s.Driver.FindElement(By.Id("Logout")).Click();
@@ -362,11 +380,20 @@ namespace BTCPayServer.Tests
                 s.Driver.FindElement(By.Id("SelectedAppType")).SendKeys("PointOfSale" + Keys.Enter);
                 s.Driver.FindElement(By.Id("SelectedStore")).SendKeys(store + Keys.Enter);
                 s.Driver.FindElement(By.Id("Create")).Click();
-                s.Driver.FindElement(By.Id("EnableShoppingCart")).Click();
+                s.Driver.FindElement(By.Id("DefaultView")).SendKeys("Cart" + Keys.Enter);
                 s.Driver.FindElement(By.Id("SaveSettings")).ForceClick();
                 s.Driver.FindElement(By.Id("ViewApp")).ForceClick();
-                s.Driver.SwitchTo().Window(s.Driver.WindowHandles.Last());
+                
+                var posBaseUrl = s.Driver.Url.Replace("/Cart", "");
                 Assert.True(s.Driver.PageSource.Contains("Tea shop"), "Unable to create PoS");
+                Assert.True(s.Driver.PageSource.Contains("Cart"), "PoS not showing correct default view");
+                
+                s.Driver.Url = posBaseUrl + "/static";
+                Assert.False(s.Driver.PageSource.Contains("Cart"), "Static PoS not showing correct view");
+                
+                s.Driver.Url = posBaseUrl + "/cart";
+                Assert.True(s.Driver.PageSource.Contains("Cart"), "Cart PoS not showing correct view");
+                
                 s.Driver.Quit();
             }
         }

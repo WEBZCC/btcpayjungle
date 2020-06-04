@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using BTCPayServer.Services.Labels;
 
@@ -6,6 +7,17 @@ namespace BTCPayServer.Models.WalletViewModels
 {
     public class WalletSendModel
     {
+        public enum ThreeStateBool
+        {
+            Maybe,
+            Yes,
+            No
+        }
+        public class FeeRateOption
+        {
+            public TimeSpan Target { get; set; }
+            public decimal FeeRate { get; set; }
+        }
         public List<TransactionOutput> Outputs { get; set; } = new List<TransactionOutput>();
 
         public class TransactionOutput
@@ -25,15 +37,8 @@ namespace BTCPayServer.Models.WalletViewModels
         public decimal CurrentBalance { get; set; }
 
         public string CryptoCode { get; set; }
-
-        public string[] RecommendedSatoshiLabels = new string[]
-        {
-            "10 minutes",
-            "1 hour",
-            "6 hours",
-            "1 day"
-        };
-        public decimal?[] RecommendedSatoshiPerByte { get; set; }
+       
+        public List<FeeRateOption> RecommendedSatoshiPerByte { get; set; }
 
         [Display(Name = "Fee rate (satoshi per byte)")]
         [Required]
@@ -46,8 +51,8 @@ namespace BTCPayServer.Models.WalletViewModels
         public string Fiat { get; set; }
         public string RateError { get; set; }
         public bool SupportRBF { get; set; }
-        [Display(Name = "Disable RBF")]
-        public bool DisableRBF { get; set; }
+        [Display(Name = "Allow fee increase (RBF)")]
+        public ThreeStateBool AllowFeeBump { get; set; }
 
         public bool NBXSeedAvailable { get; set; }
         [Display(Name = "PayJoin Endpoint Url")]
