@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Security.Claims;
 using System.Text;
@@ -19,30 +20,47 @@ namespace BTCPayServer.Services.Notifications
         private readonly ApplicationDbContextFactory _factory;
         private readonly UserManager<ApplicationUser> _userManager;
         private readonly IMemoryCache _memoryCache;
+        private readonly EventAggregator _eventAggregator;
         private readonly Dictionary<string, INotificationHandler> _handlersByNotificationType;
         private readonly Dictionary<Type, INotificationHandler> _handlersByBlobType;
 
-        public NotificationManager(ApplicationDbContextFactory factory, UserManager<ApplicationUser> userManager, IMemoryCache memoryCache, IEnumerable<INotificationHandler> handlers)
+        public NotificationManager(ApplicationDbContextFactory factory, UserManager<ApplicationUser> userManager,
+            IMemoryCache memoryCache, IEnumerable<INotificationHandler> handlers, EventAggregator eventAggregator)
         {
             _factory = factory;
             _userManager = userManager;
             _memoryCache = memoryCache;
+            _eventAggregator = eventAggregator;
             _handlersByNotificationType = handlers.ToDictionary(h => h.NotificationType);
             _handlersByBlobType = handlers.ToDictionary(h => h.NotificationBlobType);
         }
 
         private const int _cacheExpiryMs = 5000;
+
         public async Task<NotificationSummaryViewModel> GetSummaryNotifications(ClaimsPrincipal user)
         {
             var userId = _userManager.GetUserId(user);
-
-            if (_memoryCache.TryGetValue<NotificationSummaryViewModel>(userId, out var obj))
+            var cacheKey = GetNotificationsCacheId(userId);
+            if (_memoryCache.TryGetValue<NotificationSummaryViewModel>(cacheKey, out var obj))
                 return obj;
 
             var resp = await FetchNotificationsFromDb(userId);
-            _memoryCache.Set(userId, resp, new MemoryCacheEntryOptions().SetAbsoluteExpiration(TimeSpan.FromMilliseconds(_cacheExpiryMs)));
+            _memoryCache.Set(cacheKey, resp,
+                new MemoryCacheEntryOptions().SetAbsoluteExpiration(TimeSpan.FromMilliseconds(_cacheExpiryMs)));
 
             return resp;
+        }
+
+        public void InvalidateNotificationCache(string userId)
+        {
+            _memoryCache.Remove(GetNotificationsCacheId(userId));
+            
+            _eventAggregator.Publish(new UserNotificationsUpdatedEvent() {UserId = userId});
+        }
+
+        private static string GetNotificationsCacheId(string userId)
+        {
+            return $"notifications-{userId}";
         }
 
         private async Task<NotificationSummaryViewModel> FetchNotificationsFromDb(string userId)
@@ -59,10 +77,10 @@ namespace BTCPayServer.Services.Notifications
                     try
                     {
                         resp.Last5 = (await _db.Notifications
-                            .Where(a => a.ApplicationUserId == userId && !a.Seen)
-                            .OrderByDescending(a => a.Created)
-                            .Take(5)
-                            .ToListAsync())
+                                .Where(a => a.ApplicationUserId == userId && !a.Seen)
+                                .OrderByDescending(a => a.Created)
+                                .Take(5)
+                                .ToListAsync())
                             .Select(a => ToViewModel(a))
                             .ToList();
                     }
@@ -90,12 +108,7 @@ namespace BTCPayServer.Services.Notifications
         {
             var handler = GetHandler(data.NotificationType);
             var notification = JsonConvert.DeserializeObject(ZipUtils.Unzip(data.Blob), handler.NotificationBlobType);
-            var obj = new NotificationViewModel
-            {
-                Id = data.Id,
-                Created = data.Created,
-                Seen = data.Seen
-            };
+            var obj = new NotificationViewModel {Id = data.Id, Created = data.Created, Seen = data.Seen};
             handler.FillViewModel(notification, obj);
             return obj;
         }
@@ -106,6 +119,7 @@ namespace BTCPayServer.Services.Notifications
                 return h;
             throw new InvalidOperationException($"No INotificationHandler found for {notificationId}");
         }
+
         public INotificationHandler GetHandler(Type blobType)
         {
             if (_handlersByBlobType.TryGetValue(blobType, out var h))
