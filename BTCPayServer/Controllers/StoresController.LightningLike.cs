@@ -1,7 +1,5 @@
-﻿using System;
-using System.Collections.Generic;
+using System;
 using System.Linq;
-using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
 using BTCPayServer.Data;
@@ -159,7 +157,7 @@ namespace BTCPayServer.Controllers
                                 await handler.TestConnection(info, cts.Token);
                             }
                         }
-                        TempData[WellKnownTempData.SuccessMessage] = $"Connection to the lightning node succeeded ({info})";
+                        TempData[WellKnownTempData.SuccessMessage] = $"Connection to the lightning node succeeded. Your node address: {info}";
                     }
                     catch (Exception ex)
                     {

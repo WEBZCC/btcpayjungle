@@ -1,8 +1,6 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
-using System.Threading.Tasks;
 using NBitcoin;
 using NBXplorer;
 
@@ -10,7 +8,7 @@ namespace BTCPayServer
 {
     public partial class BTCPayNetworkProvider
     {
-        Dictionary<string, BTCPayNetworkBase> _Networks = new Dictionary<string, BTCPayNetworkBase>();
+        readonly Dictionary<string, BTCPayNetworkBase> _Networks = new Dictionary<string, BTCPayNetworkBase>();
 
 
         private readonly NBXplorerNetworkProvider _NBXplorerNetworkProvider;
@@ -61,6 +59,7 @@ namespace BTCPayServer
             InitMonero();
             InitPolis();
             InitChaincoin();
+            InitArgoneum();
 
             // Assume that electrum mappings are same as BTC if not specified
             foreach (var network in _Networks.Values.OfType<BTCPayNetwork>())
