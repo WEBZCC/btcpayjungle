@@ -45,6 +45,9 @@ namespace BTCPayServer.Controllers
         private readonly ApplicationDbContextFactory _dbContextFactory;
         private readonly PullPaymentHostedService _paymentHostedService;
         readonly IServiceProvider _ServiceProvider;
+
+        public WebhookNotificationManager WebhookNotificationManager { get; }
+
         public InvoiceController(
             IServiceProvider serviceProvider,
             InvoiceRepository invoiceRepository,
@@ -57,7 +60,8 @@ namespace BTCPayServer.Controllers
             BTCPayNetworkProvider networkProvider,
             PaymentMethodHandlerDictionary paymentMethodHandlerDictionary,
             ApplicationDbContextFactory dbContextFactory,
-            PullPaymentHostedService paymentHostedService)
+            PullPaymentHostedService paymentHostedService,
+            WebhookNotificationManager webhookNotificationManager)
         {
             _ServiceProvider = serviceProvider;
             _CurrencyNameTable = currencyNameTable ?? throw new ArgumentNullException(nameof(currencyNameTable));
@@ -70,6 +74,7 @@ namespace BTCPayServer.Controllers
             _paymentMethodHandlerDictionary = paymentMethodHandlerDictionary;
             _dbContextFactory = dbContextFactory;
             _paymentHostedService = paymentHostedService;
+            WebhookNotificationManager = webhookNotificationManager;
             _CSP = csp;
         }
 
@@ -195,7 +200,7 @@ namespace BTCPayServer.Controllers
                     throw new BitpayHttpException(400, "Invalid email");
                 entity.RefundMail = entity.Metadata.BuyerEmail;
             }
-            entity.Status = InvoiceStatus.New;
+            entity.Status = InvoiceStatusLegacy.New;
             HashSet<CurrencyPair> currencyPairsToFetch = new HashSet<CurrencyPair>();
             var rules = storeBlob.GetRateRules(_NetworkProvider);
             var excludeFilter = storeBlob.GetExcludedPaymentMethods(); // Here we can compose filters from other origin with PaymentFilter.Any()
