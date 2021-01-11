@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -10,6 +11,7 @@ using BTCPayServer.Services.Stores;
 using BTCPayServer.Services.Wallets;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using NBitcoin;
 using NBXplorer.DerivationStrategy;
 using StoreData = BTCPayServer.Data.StoreData;
 
@@ -41,14 +43,12 @@ namespace BTCPayServer.Controllers.GreenField
         {
             var blob = Store.GetStoreBlob();
             var excludedPaymentMethods = blob.GetExcludedPaymentMethods();
-            var defaultPaymentId = Store.GetDefaultPaymentId(_btcPayNetworkProvider);
             return Ok(Store.GetSupportedPaymentMethods(_btcPayNetworkProvider)
                 .Where((method) => method.PaymentId.PaymentType == PaymentTypes.BTCLike)
                 .OfType<DerivationSchemeSettings>()
                 .Select(strategy =>
                     new OnChainPaymentMethodData(strategy.PaymentId.CryptoCode,
-                        strategy.AccountDerivation.ToString(), !excludedPaymentMethods.Match(strategy.PaymentId),
-                        defaultPaymentId == strategy.PaymentId))
+                        strategy.AccountDerivation.ToString(), !excludedPaymentMethods.Match(strategy.PaymentId)))
                 .Where((result) => !enabledOnly || result.Enabled)
                 .ToList()
             );
@@ -73,7 +73,7 @@ namespace BTCPayServer.Controllers.GreenField
 
         [Authorize(Policy = Policies.CanViewStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Greenfield)]
         [HttpGet("~/api/v1/stores/{storeId}/payment-methods/onchain/{cryptoCode}/preview")]
-        public ActionResult<OnChainPaymentMethodPreviewResultData> GetOnChainPaymentMethodPreview(
+        public IActionResult GetOnChainPaymentMethodPreview(
             string cryptoCode,
             int offset = 0, int amount = 10)
         {
@@ -87,25 +87,34 @@ namespace BTCPayServer.Controllers.GreenField
             {
                 return NotFound();
             }
-
-            var strategy = DerivationSchemeSettings.Parse(paymentMethod.DerivationScheme, network);
-            var deposit = new NBXplorer.KeyPathTemplates(null).GetKeyPathTemplate(DerivationFeature.Deposit);
-
-            var line = strategy.AccountDerivation.GetLineFor(deposit);
-            var result = new OnChainPaymentMethodPreviewResultData();
-            for (var i = offset; i < amount; i++)
+            try
             {
-                var address = line.Derive((uint)i);
-                result.Addresses.Add(
-                    new OnChainPaymentMethodPreviewResultData.OnChainPaymentMethodPreviewResultAddressItem()
-                    {
-                        KeyPath = deposit.GetKeyPath((uint)i).ToString(),
-                        Address = address.ScriptPubKey.GetDestinationAddress(strategy.Network.NBitcoinNetwork)
-                            .ToString()
-                    });
+                var strategy = DerivationSchemeSettings.Parse(paymentMethod.DerivationScheme, network);
+                var deposit = new NBXplorer.KeyPathTemplates(null).GetKeyPathTemplate(DerivationFeature.Deposit);
+
+                var line = strategy.AccountDerivation.GetLineFor(deposit);
+                var result = new OnChainPaymentMethodPreviewResultData();
+                for (var i = offset; i < amount; i++)
+                {
+                    var address = line.Derive((uint)i);
+                    result.Addresses.Add(
+                        new OnChainPaymentMethodPreviewResultData.OnChainPaymentMethodPreviewResultAddressItem()
+                        {
+                            KeyPath = deposit.GetKeyPath((uint)i).ToString(),
+                            Address = address.ScriptPubKey.GetDestinationAddress(strategy.Network.NBitcoinNetwork)
+                                .ToString()
+                        });
+                }
+                
+                return Ok(result);
+            }
+            catch
+            {
+                ModelState.AddModelError(nameof(OnChainPaymentMethodData.DerivationScheme),
+                    "Invalid Derivation Scheme");
+                return this.CreateValidationError(ModelState);
             }
 
-            return Ok(result);
         }
         
         
@@ -126,36 +135,37 @@ namespace BTCPayServer.Controllers.GreenField
             }
             if (!ModelState.IsValid)
                 return this.CreateValidationError(ModelState);
+            DerivationSchemeSettings strategy;
             try
             {
-                var strategy = DerivationSchemeSettings.Parse(paymentMethodData.DerivationScheme, network);
-                var deposit = new NBXplorer.KeyPathTemplates(null).GetKeyPathTemplate(DerivationFeature.Deposit);
-                var line = strategy.AccountDerivation.GetLineFor(deposit);
-                var result = new OnChainPaymentMethodPreviewResultData();
-                for (var i = offset; i < amount; i++)
-                {
-                    var derivation = line.Derive((uint)i);
-                    result.Addresses.Add(
-                        new
-                            OnChainPaymentMethodPreviewResultData.
-                            OnChainPaymentMethodPreviewResultAddressItem()
-                            {
-                                KeyPath = deposit.GetKeyPath((uint)i).ToString(),
-                                Address = strategy.Network.NBXplorerNetwork.CreateAddress(strategy.AccountDerivation,
-                                    line.KeyPathTemplate.GetKeyPath((uint)i),
-                                    derivation.ScriptPubKey).ToString()
-                            });
-                }
-
-                return Ok(result);
+                strategy = DerivationSchemeSettings.Parse(paymentMethodData.DerivationScheme, network);
             }
-
             catch
             {
                 ModelState.AddModelError(nameof(OnChainPaymentMethodData.DerivationScheme),
                     "Invalid Derivation Scheme");
                 return this.CreateValidationError(ModelState);
             }
+
+            var deposit = new NBXplorer.KeyPathTemplates(null).GetKeyPathTemplate(DerivationFeature.Deposit);
+            var line = strategy.AccountDerivation.GetLineFor(deposit);
+            var result = new OnChainPaymentMethodPreviewResultData();
+            for (var i = offset; i < amount; i++)
+            {
+                var derivation = line.Derive((uint)i);
+                result.Addresses.Add(
+                    new
+                        OnChainPaymentMethodPreviewResultData.
+                        OnChainPaymentMethodPreviewResultAddressItem()
+                        {
+                            KeyPath = deposit.GetKeyPath((uint)i).ToString(),
+                            Address = strategy.Network.NBXplorerNetwork.CreateAddress(strategy.AccountDerivation,
+                                line.KeyPathTemplate.GetKeyPath((uint)i),
+                                derivation.ScriptPubKey).ToString()
+                        });
+            }
+
+                return Ok(result);
         }
 
         [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Greenfield)]
@@ -203,6 +213,18 @@ namespace BTCPayServer.Controllers.GreenField
                 var strategy = DerivationSchemeSettings.Parse(paymentMethodData.DerivationScheme, network);
                 if (strategy != null)
                     await wallet.TrackAsync(strategy.AccountDerivation);
+                strategy.Label = paymentMethodData.Label;
+                var signing = strategy.GetSigningAccountKeySettings();
+                if (paymentMethodData.AccountKeyPath is RootedKeyPath r)
+                {
+                    signing.AccountKeyPath = r.KeyPath;
+                    signing.RootFingerprint = r.MasterFingerprint;
+                }
+                else
+                {
+                    signing.AccountKeyPath = null;
+                    signing.RootFingerprint = null;
+                }
                 store.SetSupportedPaymentMethod(id, strategy);
                 storeBlob.SetExcluded(id, !paymentMethodData.Enabled);
                 store.SetStoreBlob(storeBlob);
@@ -228,7 +250,6 @@ namespace BTCPayServer.Controllers.GreenField
         {
             store ??= Store;
             var storeBlob = store.GetStoreBlob();
-            var defaultPaymentMethod = store.GetDefaultPaymentId(_btcPayNetworkProvider);
             var id = new PaymentMethodId(cryptoCode, PaymentTypes.BTCLike);
             var paymentMethod = store
                 .GetSupportedPaymentMethods(_btcPayNetworkProvider)
@@ -239,8 +260,11 @@ namespace BTCPayServer.Controllers.GreenField
             return paymentMethod == null
                 ? null
                 : new OnChainPaymentMethodData(paymentMethod.PaymentId.CryptoCode,
-                    paymentMethod.AccountDerivation.ToString(), !excluded,
-                    defaultPaymentMethod == paymentMethod.PaymentId);
+                    paymentMethod.AccountDerivation.ToString(), !excluded)
+                {
+                    Label = paymentMethod.Label,
+                    AccountKeyPath = paymentMethod.GetSigningAccountKeySettings().GetRootedKeyPath()
+                };
         }
     }
 }
