@@ -5,14 +5,12 @@ using BTCPayServer.Abstractions.Constants;
 using BTCPayServer.Client;
 using BTCPayServer.Client.Models;
 using BTCPayServer.Payments;
-using BTCPayServer.Security;
 using BTCPayServer.Services;
 using BTCPayServer.Services.Invoices;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Cors;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
-using Microsoft.EntityFrameworkCore.Metadata.Conventions;
 using NBitcoin;
 using CreateInvoiceRequest = BTCPayServer.Client.Models.CreateInvoiceRequest;
 using InvoiceData = BTCPayServer.Client.Models.InvoiceData;
@@ -72,7 +70,7 @@ namespace BTCPayServer.Controllers.GreenField
             }
 
             var invoice = await _invoiceRepository.GetInvoice(invoiceId, true);
-            if (invoice.StoreId != store.Id)
+            if (invoice?.StoreId != store.Id)
             {
                 return NotFound();
             }
@@ -337,7 +335,9 @@ namespace BTCPayServer.Controllers.GreenField
                     PaymentMethods =
                         entity.GetPaymentMethods().Select(method => method.GetId().ToStringNormalized()).ToArray(),
                     SpeedPolicy = entity.SpeedPolicy,
-                    DefaultLanguage = entity.DefaultLanguage
+                    DefaultLanguage = entity.DefaultLanguage,
+                    RedirectAutomatically = entity.RedirectAutomatically,
+                    RedirectURL = entity.RedirectURLTemplate
                 }
             };
         }
