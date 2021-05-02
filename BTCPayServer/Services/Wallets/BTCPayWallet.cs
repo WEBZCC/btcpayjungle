@@ -24,6 +24,7 @@ namespace BTCPayServer.Services.Wallets
         public KeyPath KeyPath { get; set; }
         public IMoney Value { get; set; }
         public Coin Coin { get; set; }
+        public int Confirmations { get; set; }
     }
     public class NetworkCoins
     {
@@ -259,17 +260,18 @@ namespace BTCPayServer.Services.Wallets
                               Timestamp = c.Timestamp,
                               OutPoint = c.Outpoint,
                               ScriptPubKey = c.ScriptPubKey,
-                              Coin = c.AsCoin(derivationStrategy)
+                              Coin = c.AsCoin(derivationStrategy),
+                              Confirmations = c.Confirmations
                           }).ToArray();
         }
 
-        public Task<decimal> GetBalance(DerivationStrategyBase derivationStrategy, CancellationToken cancellation = default(CancellationToken))
+        public Task<GetBalanceResponse> GetBalance(DerivationStrategyBase derivationStrategy, CancellationToken cancellation = default(CancellationToken))
         {
             return _MemoryCache.GetOrCreateAsync("CACHEDBALANCE_" + derivationStrategy.ToString(), async (entry) =>
             {
                 var result = await _Client.GetBalanceAsync(derivationStrategy, cancellation);
                 entry.AbsoluteExpiration = DateTimeOffset.UtcNow + CacheSpan;
-                return result.Total.GetValue(_Network);
+                return result;
             });
         }
     }

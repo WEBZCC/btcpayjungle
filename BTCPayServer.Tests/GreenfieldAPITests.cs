@@ -687,7 +687,7 @@ namespace BTCPayServer.Tests
                 Assert.NotNull(newDelivery);
                 Assert.Equal(404, newDelivery.HttpCode);
                 var req = await clientProfile.GetWebhookDeliveryRequest(user.StoreId, hook.Id, newDeliveryId);
-                Assert.Equal(delivery.Id, req.OrignalDeliveryId);
+                Assert.Equal(delivery.Id, req.OriginalDeliveryId);
                 Assert.True(req.IsRedelivery);
                 Assert.Equal(WebhookDeliveryStatus.HttpError, newDelivery.Status);
             });
@@ -951,7 +951,7 @@ namespace BTCPayServer.Tests
                 });
                 await user.RegisterDerivationSchemeAsync("BTC");
                 var newInvoice = await client.CreateInvoice(user.StoreId,
-                    new CreateInvoiceRequest() { Currency = "USD", Amount = 1, Metadata = JObject.Parse("{\"itemCode\": \"testitem\"}"), Checkout = new CreateInvoiceRequest.CheckoutOptions()
+                    new CreateInvoiceRequest() { Currency = "USD", Amount = 1, Metadata = JObject.Parse("{\"itemCode\": \"testitem\", \"orderId\": \"testOrder\"}"), Checkout = new CreateInvoiceRequest.CheckoutOptions()
                     {
                         RedirectAutomatically = true
                     }});
@@ -964,6 +964,62 @@ namespace BTCPayServer.Tests
                 Assert.Single(invoices);
                 Assert.Equal(newInvoice.Id, invoices.First().Id);
 
+                //list Filtered
+                 var invoicesFiltered = await viewOnly.GetInvoices(user.StoreId,
+                     orderId: null, status: null, DateTimeOffset.Now.AddHours(-1),
+                     DateTimeOffset.Now.AddHours(1));
+
+                 Assert.NotNull(invoicesFiltered);
+                 Assert.Single(invoicesFiltered);
+                 Assert.Equal(newInvoice.Id, invoicesFiltered.First().Id);
+
+                 //list Yesterday
+                 var invoicesYesterday = await viewOnly.GetInvoices(user.StoreId,
+                     orderId: null, status: null, DateTimeOffset.Now.AddDays(-2),
+                     DateTimeOffset.Now.AddDays(-1));
+                 Assert.NotNull(invoicesYesterday);
+                 Assert.Empty(invoicesYesterday);
+
+                // Error, startDate and endDate inverted
+                await AssertValidationError(new[] { "startDate", "endDate" },
+                    () => viewOnly.GetInvoices(user.StoreId,
+                    orderId: null, status: null, DateTimeOffset.Now.AddDays(-1),
+                    DateTimeOffset.Now.AddDays(-2)));
+
+                await AssertValidationError(new[] { "startDate" },
+                    () => viewOnly.SendHttpRequest<Client.Models.InvoiceData[]>($"api/v1/stores/{user.StoreId}/invoices", new Dictionary<string, object>()
+                    {
+                        { "startDate", "blah" }
+                    }));
+
+
+                //list Existing OrderId
+                var invoicesExistingOrderId =
+                     await viewOnly.GetInvoices(user.StoreId, orderId: newInvoice.Metadata["orderId"].ToString());
+                 Assert.NotNull(invoicesExistingOrderId);
+                 Assert.Single(invoicesFiltered);
+                 Assert.Equal(newInvoice.Id, invoicesFiltered.First().Id);
+
+                 //list NonExisting OrderId
+                 var invoicesNonExistingOrderId =
+                     await viewOnly.GetInvoices(user.StoreId, orderId: "NonExistingOrderId");
+                 Assert.NotNull(invoicesNonExistingOrderId);
+                 Assert.Empty(invoicesNonExistingOrderId);
+
+                 //list Existing Status
+                 var invoicesExistingStatus =
+                     await viewOnly.GetInvoices(user.StoreId, status:new []{newInvoice.Status});
+                 Assert.NotNull(invoicesExistingStatus);
+                 Assert.Single(invoicesExistingStatus);
+                 Assert.Equal(newInvoice.Id, invoicesExistingStatus.First().Id);
+
+                 //list NonExisting Status
+                 var invoicesNonExistingStatus = await viewOnly.GetInvoices(user.StoreId,
+                     status: new []{BTCPayServer.Client.Models.InvoiceStatus.Invalid});
+                 Assert.NotNull(invoicesNonExistingStatus);
+                 Assert.Empty(invoicesNonExistingStatus);
+                 
+                 
                 //get
                 var invoice = await viewOnly.GetInvoice(user.StoreId, newInvoice.Id);
                 Assert.Equal(newInvoice.Metadata, invoice.Metadata);
@@ -1093,6 +1149,24 @@ namespace BTCPayServer.Tests
                 {
                     Assert.Equal("pt-PT", langs.FindBestMatch(match).Code);
                 }
+
+                //payment method activation tests
+                var store = await client.GetStore(user.StoreId);
+                Assert.False(store.LazyPaymentMethods);
+                store.LazyPaymentMethods = true;
+                store = await client.UpdateStore(store.Id, 
+                    JObject.FromObject(store).ToObject<UpdateStoreRequest>());
+                Assert.True(store.LazyPaymentMethods);
+
+                invoice = await client.CreateInvoice(user.StoreId, new CreateInvoiceRequest() {Amount = 1, Currency = "USD"});
+                paymentMethods = await client.GetInvoicePaymentMethods(store.Id, invoice.Id);
+                Assert.Single(paymentMethods);
+                Assert.False(paymentMethods.First().Activated);
+                await client.ActivateInvoicePaymentMethod(user.StoreId, invoice.Id,
+                    paymentMethods.First().PaymentMethod);
+                paymentMethods = await client.GetInvoicePaymentMethods(store.Id, invoice.Id);
+                Assert.Single(paymentMethods);
+                Assert.True(paymentMethods.First().Activated);
             }
         }
 
@@ -1417,6 +1491,10 @@ namespace BTCPayServer.Tests
             var overview = await client.ShowOnChainWalletOverview(walletId.StoreId, walletId.CryptoCode );
             Assert.Equal(0m, overview.Balance);
             
+            
+            var fee = await client.GetOnChainFeeRate(walletId.StoreId, walletId.CryptoCode );
+            Assert.NotNull( fee.FeeRate);
+
             await AssertHttpError(403, async () =>
             {
                 await viewOnlyClient.GetOnChainWalletReceiveAddress(walletId.StoreId, walletId.CryptoCode );
