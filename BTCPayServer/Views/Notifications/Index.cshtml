@@ -18,7 +18,7 @@
             <div class="row button-row">
                 <div class="col-lg-6">
                     <span class="dropdown" style="display:none;" id="MassAction">
-                        <button class="btn btn-primary dropdown-toggle" type="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                        <button class="btn btn-primary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
                             Actions
                         </button>
                         <div class="dropdown-menu">
@@ -37,7 +37,7 @@
                             <th width="30px" class="only-for-js">
                                 @if (Model.Total > 0) 
                                 {
-                                    <input name="selectedItems" type="checkbox" onClick="selectAll(this);" />
+                                    <input name="selectedItems" type="checkbox" class="form-check-input" onClick="selectAll(this);" />
                                 }
                             </th>
                             <th width="190px">
@@ -47,7 +47,7 @@
                                 </a>
                             </th>
                             <th>Message</th>
-                            <th class="text-right">Actions</th>
+                            <th class="text-end">Actions</th>
                         </tr>
                         </thead>
                         <tbody>
@@ -55,7 +55,7 @@
                         {
                             <tr data-guid="@item.Id" class="notification-row @(item.Seen ? "seen" : "")">
                                 <td class="only-for-js">
-                                    <input name="selectedItems" type="checkbox" class="selector" value="@item.Id"/>
+                                    <input name="selectedItems" type="checkbox" class="selector form-check-input" value="@item.Id"/>
                                 </td>
                                 <td onclick="toggleRowCheckbox(this)">
                                     <span class="switchTimeFormat" data-switch="@item.Created.ToTimeAgo()">
@@ -65,7 +65,7 @@
                                 <td onclick="toggleRowCheckbox(this)">
                                     @item.Body
                                 </td>
-                                <td class="text-right font-weight-normal">
+                                <td class="text-end fw-normal">
                                     @if (!String.IsNullOrEmpty(item.ActionLink))
                                     {
                                         <a href="@item.ActionLink" class="btn btn-link p-0">Details</a>
@@ -132,7 +132,7 @@ tr.seen td {
         updateSelectors();
     }
 
-    $(function () {
+    document.addEventListener("DOMContentLoaded", function () {
         $(".selector").change(updateSelectors);
         updateSelectors();
     });

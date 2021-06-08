@@ -5,7 +5,6 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
-using AngleSharp.Dom.Events;
 using BTCPayServer.Client.Models;
 using BTCPayServer.Configuration;
 using BTCPayServer.Data;
@@ -168,7 +167,7 @@ namespace BTCPayServer.Payments.Lightning
                 }
                 
             }));
-            leases.Add(_Aggregator.Subscribe<Events.InvoicePaymentMethodActivated>(async inv =>
+            leases.Add(_Aggregator.Subscribe<Events.InvoicePaymentMethodActivated>(inv =>
             {
                 if (inv.PaymentMethodId.PaymentType == LightningPaymentType.Instance)
                 {
