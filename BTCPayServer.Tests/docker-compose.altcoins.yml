@@ -19,7 +19,7 @@ services:
       TESTS_DB: "Postgres"
       TESTS_POSTGRES: User ID=postgres;Host=postgres;Port=5432;Database=btcpayserver
       TESTS_HOSTNAME: tests
-      TESTS_RUN_EXTERNAL_INTEGRATION: ${TESTS_RUN_EXTERNAL_INTEGRATION:-false}
+      TESTS_RUN_EXTERNAL_INTEGRATION: ${TESTS_RUN_EXTERNAL_INTEGRATION:-"false"}
       TESTS_AzureBlobStorageConnectionString: ${TESTS_AzureBlobStorageConnectionString:-none}
       TEST_MERCHANTLIGHTNINGD: "type=clightning;server=unix://etc/merchant_lightningd_datadir/lightning-rpc"
       TEST_CUSTOMERLIGHTNINGD: "type=clightning;server=unix://etc/customer_lightningd_datadir/lightning-rpc"
@@ -69,7 +69,7 @@ services:
         - "sshd_datadir:/root/.ssh"
 
   devlnd: 
-    image: btcpayserver/bitcoin:0.21.0
+    image: btcpayserver/bitcoin:0.21.1
     environment:
       BITCOIN_NETWORK: regtest
       BITCOIN_WALLETDIR: "/data/wallets"
@@ -84,7 +84,7 @@ services:
       - customer_lnd
       - merchant_lnd
   nbxplorer:
-    image: nicolasdorier/nbxplorer:2.1.49
+    image: nicolasdorier/nbxplorer:2.1.56
     restart: unless-stopped
     ports:
       - "32838:32838"
@@ -118,7 +118,7 @@ services:
 
   bitcoind:
     restart: unless-stopped
-    image: btcpayserver/bitcoin:0.21.0
+    image: btcpayserver/bitcoin:0.21.1
     environment:
       BITCOIN_NETWORK: regtest
       BITCOIN_WALLETDIR: "/data/wallets"
@@ -146,7 +146,7 @@ services:
       - "bitcoin_datadir:/data"
 
   customer_lightningd:
-    image: btcpayserver/lightning:v0.9.3-1-dev
+    image: btcpayserver/lightning:v0.10.1-dev
     stop_signal: SIGKILL
     restart: unless-stopped
     environment: 
@@ -195,7 +195,7 @@ services:
       - merchant_lightningd
 
   merchant_lightningd:
-    image: btcpayserver/lightning:v0.9.3-1-dev
+    image: btcpayserver/lightning:v0.10.1-dev
     stop_signal: SIGKILL
     environment: 
       EXPOSE_TCP: "true"
@@ -227,7 +227,7 @@ services:
       - "5432"
 
   merchant_lnd:
-    image: btcpayserver/lnd:v0.12.1-beta
+    image: btcpayserver/lnd:v0.13.1-beta-withloop
     restart: unless-stopped
     environment:
       LND_CHAIN: "btc"
@@ -261,7 +261,7 @@ services:
       - bitcoind
 
   customer_lnd:
-    image: btcpayserver/lnd:v0.12.1-beta
+    image: btcpayserver/lnd:v0.13.1-beta-withloop
     restart: unless-stopped
     environment:
       LND_CHAIN: "btc"

@@ -1,4 +1,9 @@
-﻿/* General and site-wide Bootstrap modifications */
+﻿/* Set scroll padding so that anchors don't disappear underneath the fixed navbar */ 
+html {
+    scroll-padding-top: 80px;
+}
+
+/* General and site-wide Bootstrap modifications */
 .logo {
     height: 34px;
 }
@@ -18,6 +23,12 @@
     overflow: hidden;
     display: block;
     white-space: nowrap;
+}
+
+@media (min-width: 768px) {
+    .text-md-nowrap {
+        white-space: nowrap;
+    }
 }
 
 @media (min-width: 768px) {
@@ -206,6 +217,12 @@ h2 small .fa-question-circle-o {
 .w-150px { width: 150px; }
 .w-175px { width: 175px; }
 .w-200px { width: 200px; }
+.w-225px { width: 225px; }
+.w-250px { width: 250px; }
+.w-275px { width: 275px; }
+.w-300px { width: 300px; }
+.w-325px { width: 325px; }
+.w-350px { width: 350px; }
 
 /* Print */
 @media print {
@@ -213,7 +230,7 @@ h2 small .fa-question-circle-o {
     .table th {
         background: transparent;
     }
-    .jumbotron {
+    .bg-tile.h-100.p-3 {
         padding: 1rem 0 !important;
     }
     .text-print-default {

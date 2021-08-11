@@ -146,7 +146,7 @@ namespace BTCPayServer.Tests
         {
             var tx = network.NBitcoinNetwork.CreateTransaction();
             tx.Inputs.Add(new OutPoint(RandomUtils.GetUInt256(), 0), Script.Empty);
-            tx.Outputs.Add(Money.Coins(1.0m), new Key().ScriptPubKey);
+            tx.Outputs.Add(Money.Coins(1.0m), new Key().GetScriptPubKey(ScriptPubKeyType.Legacy));
             return tx;
         }
 
@@ -184,12 +184,16 @@ namespace BTCPayServer.Tests
 
                 foreach (ScriptPubKeyType senderAddressType in Enum.GetValues(typeof(ScriptPubKeyType)))
                 {
+                    if (senderAddressType == ScriptPubKeyType.TaprootBIP86)
+                        continue;
                     var senderUser = tester.NewAccount();
                     senderUser.GrantAccess(true);
                     senderUser.RegisterDerivationScheme("BTC", senderAddressType);
 
                     foreach (ScriptPubKeyType receiverAddressType in Enum.GetValues(typeof(ScriptPubKeyType)))
                     {
+                        if (receiverAddressType == ScriptPubKeyType.TaprootBIP86)
+                            continue;
                         var senderCoin = await senderUser.ReceiveUTXO(Money.Satoshis(100000), network);
 
                         Logs.Tester.LogInformation($"Testing payjoin with sender: {senderAddressType} receiver: {receiverAddressType}");
@@ -224,6 +228,57 @@ namespace BTCPayServer.Tests
 
         [Fact]
         [Trait("Selenium", "Selenium")]
+        public async Task CanUsePayjoinForTopUp()
+        {
+            using (var s = SeleniumTester.Create())
+            {
+                await s.StartAsync();
+                s.RegisterNewUser(true);
+                var receiver = s.CreateNewStore();
+                var receiverSeed = s.GenerateWallet("BTC", "", true, true, ScriptPubKeyType.Segwit);
+                var receiverWalletId = new WalletId(receiver.storeId, "BTC");
+
+                var sender = s.CreateNewStore();
+                var senderSeed = s.GenerateWallet("BTC", "", true, true, ScriptPubKeyType.Segwit);
+                var senderWalletId = new WalletId(sender.storeId, "BTC");
+
+                await s.Server.ExplorerNode.GenerateAsync(1);
+                await s.FundStoreWallet(senderWalletId);
+                await s.FundStoreWallet(receiverWalletId);
+
+                var invoiceId = s.CreateInvoice(receiver.storeName, null, "BTC");
+                s.GoToInvoiceCheckout(invoiceId);
+                var bip21 = s.Driver.FindElement(By.ClassName("payment__details__instruction__open-wallet__btn"))
+                    .GetAttribute("href");
+                Assert.Contains($"{PayjoinClient.BIP21EndpointKey}=", bip21);
+                s.GoToWallet(senderWalletId, WalletsNavPages.Send);
+                s.Driver.FindElement(By.Id("bip21parse")).Click();
+                s.Driver.SwitchTo().Alert().SendKeys(bip21);
+                s.Driver.SwitchTo().Alert().Accept();
+                s.Driver.FindElement(By.Id("Outputs_0__Amount")).Clear();
+                s.Driver.FindElement(By.Id("Outputs_0__Amount")).SendKeys("0.023");
+
+                s.Driver.FindElement(By.Id("SignTransaction")).Click();
+
+                await s.Server.WaitForEvent<NewOnChainTransactionEvent>(() =>
+                {
+                    s.Driver.FindElement(By.CssSelector("button[value=payjoin]")).Click();
+                    return Task.CompletedTask;
+                });
+
+                s.FindAlertMessage(StatusMessageModel.StatusSeverity.Success);
+                var invoiceRepository = s.Server.PayTester.GetService<InvoiceRepository>();
+                await TestUtils.EventuallyAsync(async () =>
+                {
+                    var invoice = await invoiceRepository.GetInvoice(invoiceId);
+                    Assert.Equal(InvoiceStatusLegacy.Paid, invoice.Status);
+                    Assert.Equal(0.023m, invoice.Price);
+                });
+            }
+        }
+
+        [Fact]
+        [Trait("Selenium", "Selenium")]
         public async Task CanUsePayjoinViaUI()
         {
             using (var s = SeleniumTester.Create())
@@ -238,19 +293,15 @@ namespace BTCPayServer.Tests
                     var receiverSeed = s.GenerateWallet("BTC", "", true, true, format);
                     var receiverWalletId = new WalletId(receiver.storeId, "BTC");
 
-                    //payjoin is not enabled by default.
+                    //payjoin is enabled by default.
                     var invoiceId = s.CreateInvoice(receiver.storeName);
                     s.GoToInvoiceCheckout(invoiceId);
                     var bip21 = s.Driver.FindElement(By.ClassName("payment__details__instruction__open-wallet__btn"))
                         .GetAttribute("href");
-                    Assert.DoesNotContain($"{PayjoinClient.BIP21EndpointKey}=", bip21);
+                    Assert.Contains($"{PayjoinClient.BIP21EndpointKey}=", bip21);
 
                     s.GoToHome();
                     s.GoToStore(receiver.storeId);
-                    //payjoin is not enabled by default.
-                    Assert.False(s.Driver.FindElement(By.Id("PayJoinEnabled")).Selected);
-                    s.Driver.SetCheckbox(By.Id("PayJoinEnabled"), true);
-                    s.Driver.FindElement(By.Id("Save")).Click();
                     Assert.True(s.Driver.FindElement(By.Id("PayJoinEnabled")).Selected);
 
                     var sender = s.CreateNewStore();
@@ -271,8 +322,7 @@ namespace BTCPayServer.Tests
                     s.Driver.SwitchTo().Alert().Accept();
                     Assert.False(string.IsNullOrEmpty(s.Driver.FindElement(By.Id("PayJoinBIP21"))
                         .GetAttribute("value")));
-                    s.Driver.FindElement(By.Id("SendDropdownToggle")).Click();
-                    s.Driver.FindElement(By.CssSelector("button[value=nbx-seed]")).Click();
+                    s.Driver.FindElement(By.Id("SignTransaction")).Click();
                     await s.Server.WaitForEvent<NewOnChainTransactionEvent>(() =>
                     {
                         s.Driver.FindElement(By.CssSelector("button[value=payjoin]")).Click();
@@ -307,8 +357,7 @@ namespace BTCPayServer.Tests
                         .GetAttribute("value")));
                     s.Driver.FindElement(By.Id("FeeSatoshiPerByte")).Clear();
                     s.Driver.FindElement(By.Id("FeeSatoshiPerByte")).SendKeys("2");
-                    s.Driver.FindElement(By.Id("SendDropdownToggle")).Click();
-                    s.Driver.FindElement(By.CssSelector("button[value=nbx-seed]")).Click();
+                    s.Driver.FindElement(By.Id("SignTransaction")).Click();
                     var txId = await s.Server.WaitForEvent<NewOnChainTransactionEvent>(() =>
                     {
                         s.Driver.FindElement(By.CssSelector("button[value=payjoin]")).Click();
@@ -521,7 +570,7 @@ namespace BTCPayServer.Tests
                 address = (await nbx.GetUnusedAsync(bob.DerivationScheme, DerivationFeature.Deposit)).Address;
                 tester.ExplorerNode.SendToAddress(address, Money.Coins(1.1m));
                 await notifications.NextEventAsync();
-                bob.ModifyStore(s => s.PayJoinEnabled = true);
+                await bob.ModifyStore(s => s.PayJoinEnabled = true);
                 var invoice = bob.BitPay.CreateInvoice(
                     new Invoice() { Price = 0.1m, Currency = "BTC", FullNotifications = true });
                 var invoiceBIP21 = new BitcoinUrlBuilder(invoice.CryptoInfo.First().PaymentUrls.BIP21,

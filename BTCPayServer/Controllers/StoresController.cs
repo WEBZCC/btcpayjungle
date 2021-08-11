@@ -27,6 +27,7 @@ using BTCPayServer.Services.Stores;
 using BTCPayServer.Services.Wallets;
 using BundlerMinifier.TagHelpers;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
@@ -65,11 +66,9 @@ namespace BTCPayServer.Controllers
             SettingsRepository settingsRepository,
             IAuthorizationService authorizationService,
             EventAggregator eventAggregator,
-            CssThemeManager cssThemeManager,
             AppService appService,
-            IWebHostEnvironment webHostEnvironment,
             WebhookNotificationManager webhookNotificationManager,
-            IOptions<LightningNetworkOptions> lightningNetworkOptions)
+            IDataProtectionProvider dataProtector)
         {
             _RateFactory = rateFactory;
             _Repo = repo;
@@ -81,10 +80,8 @@ namespace BTCPayServer.Controllers
             _paymentMethodHandlerDictionary = paymentMethodHandlerDictionary;
             _settingsRepository = settingsRepository;
             _authorizationService = authorizationService;
-            _CssThemeManager = cssThemeManager;
             _appService = appService;
-            _webHostEnvironment = webHostEnvironment;
-            _lightningNetworkOptions = lightningNetworkOptions;
+            DataProtector = dataProtector.CreateProtector("ConfigProtector");
             WebhookNotificationManager = webhookNotificationManager;
             _EventAggregator = eventAggregator;
             _NetworkProvider = networkProvider;
@@ -108,10 +105,7 @@ namespace BTCPayServer.Controllers
         private readonly PaymentMethodHandlerDictionary _paymentMethodHandlerDictionary;
         private readonly SettingsRepository _settingsRepository;
         private readonly IAuthorizationService _authorizationService;
-        private readonly CssThemeManager _CssThemeManager;
         private readonly AppService _appService;
-        private readonly IWebHostEnvironment _webHostEnvironment;
-        private readonly IOptions<LightningNetworkOptions> _lightningNetworkOptions;
         private readonly EventAggregator _EventAggregator;
 
         [TempData]
@@ -413,6 +407,7 @@ namespace BTCPayServer.Controllers
             vm.CustomCSS = storeBlob.CustomCSS;
             vm.CustomLogo = storeBlob.CustomLogo;
             vm.HtmlTitle = storeBlob.HtmlTitle;
+            vm.AutoDetectLanguage = storeBlob.AutoDetectLanguage;
             vm.SetLanguages(_LangService, storeBlob.DefaultLang);
             return View(vm);
         }
@@ -463,7 +458,6 @@ namespace BTCPayServer.Controllers
                 }
             }
             
-
             if (!ModelState.IsValid)
             {
                 return View(model);
@@ -488,6 +482,7 @@ namespace BTCPayServer.Controllers
             blob.CustomLogo = model.CustomLogo;
             blob.CustomCSS = model.CustomCSS;
             blob.HtmlTitle = string.IsNullOrWhiteSpace(model.HtmlTitle) ? null : model.HtmlTitle;
+            blob.AutoDetectLanguage = model.AutoDetectLanguage;
             blob.DefaultLang = model.DefaultLang;
 
             if (CurrentStore.SetStoreBlob(blob))
@@ -555,12 +550,9 @@ namespace BTCPayServer.Controllers
                 }
             }
         }
-
-
-
-        [HttpGet]
-        [Route("{storeId}")]
-        public IActionResult UpdateStore()
+        
+        [HttpGet("{storeId}")]
+        public async Task<IActionResult> UpdateStore()
         {
             var store = HttpContext.GetStoreData();
             if (store == null)
@@ -583,12 +575,17 @@ namespace BTCPayServer.Controllers
             vm.PayJoinEnabled = storeBlob.PayJoinEnabled;
             vm.HintWallet = storeBlob.Hints.Wallet;
             vm.HintLightning = storeBlob.Hints.Lightning;
+            
+            (bool canUseHotWallet, _) = await CanUseHotWallet();
+            vm.CanUsePayJoin = canUseHotWallet && store
+                .GetSupportedPaymentMethods(_NetworkProvider)
+                .OfType<DerivationSchemeSettings>()
+                .Any(settings => settings.Network.SupportPayJoin && settings.IsHotWallet);
+            
             return View(vm);
         }
-
-
-        [HttpPost]
-        [Route("{storeId}")]
+        
+        [HttpPost("{storeId}")]
         public async Task<IActionResult> UpdateStore(StoreViewModel model, string command = null)
         {
             bool needUpdate = false;
@@ -632,11 +629,7 @@ namespace BTCPayServer.Controllers
                 {
                     var problematicPayjoinEnabledMethods = CurrentStore.GetSupportedPaymentMethods(_NetworkProvider)
                         .OfType<DerivationSchemeSettings>()
-                        .Where(settings =>
-                            settings.Network.SupportPayJoin &&
-                            string.IsNullOrEmpty(_ExplorerProvider.GetExplorerClient(settings.Network)
-                                .GetMetadata<string>(settings.AccountDerivation,
-                                    WellknownMetadataKeys.Mnemonic)))
+                        .Where(settings => settings.Network.SupportPayJoin && !settings.IsHotWallet)
                         .Select(settings => settings.PaymentId.CryptoCode)
                         .ToArray();
 
@@ -689,10 +682,9 @@ namespace BTCPayServer.Controllers
 
         }
 
-        private DerivationSchemeSettings ParseDerivationStrategy(string derivationScheme, Script hint, BTCPayNetwork network)
+        private DerivationSchemeSettings ParseDerivationStrategy(string derivationScheme, BTCPayNetwork network)
         {
             var parser = new DerivationSchemeParser(network);
-            parser.HintScriptPubKey = hint;
             try
             {
                 var derivationSchemeSettings = new DerivationSchemeSettings();
@@ -827,6 +819,7 @@ namespace BTCPayServer.Controllers
 
         public string GeneratedPairingCode { get; set; }
         public WebhookNotificationManager WebhookNotificationManager { get; }
+        public IDataProtector DataProtector { get; }
 
         [HttpGet]
         [Route("{storeId}/Tokens/Create")]
@@ -1006,7 +999,7 @@ namespace BTCPayServer.Controllers
             var appUrl = HttpContext.Request.GetAbsoluteRoot().WithTrailingSlash();
             var model = new PayButtonViewModel
             {
-                Price = 10,
+                Price = null,
                 Currency = DEFAULT_CURRENCY,
                 ButtonSize = 2,
                 UrlRoot = appUrl,

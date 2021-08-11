@@ -413,7 +413,7 @@ namespace BTCPayServer.Payments.PayJoin
             if (additionalFee > Money.Zero)
             {
                 // If the user overpaid, taking fee on our output (useful if sender dump a full UTXO for privacy)
-                for (int i = 0; i < newTx.Outputs.Count && additionalFee > Money.Zero && due < Money.Zero; i++)
+                for (int i = 0; i < newTx.Outputs.Count && additionalFee > Money.Zero && due < Money.Zero && !invoice.IsUnsetTopUp(); i++)
                 {
                     if (disableoutputsubstitution)
                         break;
@@ -462,10 +462,11 @@ namespace BTCPayServer.Payments.PayJoin
                 var coin = selectedUtxo.AsCoin(derivationSchemeSettings.AccountDerivation);
                 signedInput.UpdateFromCoin(coin);
                 var privateKey = accountKey.Derive(selectedUtxo.KeyPath).PrivateKey;
-                signedInput.Sign(privateKey, new SigningOptions()
+                signedInput.PSBT.Settings.SigningOptions = new SigningOptions()
                 {
                     EnforceLowR = enforcedLowR
-                });
+                };
+                signedInput.Sign(privateKey);
                 signedInput.FinalizeInput();
                 newTx.Inputs[signedInput.Index].WitScript = newPsbt.Inputs[(int)signedInput.Index].FinalScriptWitness;
             }

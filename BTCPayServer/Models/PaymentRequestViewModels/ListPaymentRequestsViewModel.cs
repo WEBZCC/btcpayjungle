@@ -66,7 +66,7 @@ namespace BTCPayServer.Models.PaymentRequestViewModels
         public string Email { get; set; }
 
         [MaxLength(500)]
-        [Display(Name = "Custom bootstrap CSS file")]
+        [Display(Name = "Custom CSS URL")]
         public string CustomCSSLink { get; set; }
 
         [Display(Name = "Custom CSS Code")]
@@ -159,6 +159,7 @@ namespace BTCPayServer.Models.PaymentRequestViewModels
             public DateTime ReceivedDate { get; set; }
             public string Link { get; set; }
             public string Id { get; set; }
+            public string Destination { get; set; }
         }
     }
 }
