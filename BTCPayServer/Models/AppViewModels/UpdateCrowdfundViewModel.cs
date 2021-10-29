@@ -15,7 +15,6 @@ namespace BTCPayServer.Models.AppViewModels
         [MaxLength(30)]
         public string Title { get; set; }
 
-        [MaxLength(50)]
         public string Tagline { get; set; }
 
         [Required]
@@ -53,10 +52,9 @@ namespace BTCPayServer.Models.AppViewModels
         [Display(Name = "End date")]
         public DateTime? EndDate { get; set; }
 
-        [Required]
         [MaxLength(5)]
         [Display(Name = "Primary currency used for targets and stats. (e.g. BTC, LTC, USD, etc.)")]
-        public string TargetCurrency { get; set; } = "BTC";
+        public string TargetCurrency { get; set; }
 
         [Display(Name = "Set a target amount")]
         [Range(0, double.PositiveInfinity)]
@@ -93,11 +91,14 @@ namespace BTCPayServer.Models.AppViewModels
         
         [Display(Name = "Display contribution ranking")]
         public bool DisplayPerksRanking { get; set; }
+        
+        [Display(Name = "Display contribution value")]
+        public bool DisplayPerksValue { get; set; }
 
         [Display(Name = "Sounds to play when a payment is made. One sound per line")]
         public string Sounds { get; set; }
         
-        [Display(Name = "Colors to rotate between with animation when a payment is made. First color is the default background. One color per line. Can be any valid css color value.")]
+        [Display(Name = "Colors to rotate between with animation when a payment is made. One color per line (any valid css color value).")]
         public string AnimationColors { get; set; }
 
         // NOTE: Improve validation if needed

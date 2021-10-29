@@ -20,6 +20,7 @@ using BTCPayServer.Views.Wallets;
 using Microsoft.AspNetCore.Http;
 using NBitcoin;
 using BTCPayServer.BIP78.Sender;
+using BTCPayServer.Views.Stores;
 using NBitcoin.Payment;
 using NBitpayClient;
 using NBXplorer.DerivationStrategy;
@@ -255,8 +256,8 @@ namespace BTCPayServer.Tests
                 s.Driver.FindElement(By.Id("bip21parse")).Click();
                 s.Driver.SwitchTo().Alert().SendKeys(bip21);
                 s.Driver.SwitchTo().Alert().Accept();
-                s.Driver.FindElement(By.Id("Outputs_0__Amount")).Clear();
-                s.Driver.FindElement(By.Id("Outputs_0__Amount")).SendKeys("0.023");
+                s.Driver.FindElementUntilNotStaled(By.Id("Outputs_0__Amount"), we => we.Clear());
+                s.Driver.FindElementUntilNotStaled(By.Id("Outputs_0__Amount"), we => we.SendKeys("0.023"));
 
                 s.Driver.FindElement(By.Id("SignTransaction")).Click();
 
@@ -301,7 +302,7 @@ namespace BTCPayServer.Tests
                     Assert.Contains($"{PayjoinClient.BIP21EndpointKey}=", bip21);
 
                     s.GoToHome();
-                    s.GoToStore(receiver.storeId);
+                    s.GoToStore(receiver.storeId, StoreNavPages.Payment);
                     Assert.True(s.Driver.FindElement(By.Id("PayJoinEnabled")).Selected);
 
                     var sender = s.CreateNewStore();
@@ -570,9 +571,9 @@ namespace BTCPayServer.Tests
                 address = (await nbx.GetUnusedAsync(bob.DerivationScheme, DerivationFeature.Deposit)).Address;
                 tester.ExplorerNode.SendToAddress(address, Money.Coins(1.1m));
                 await notifications.NextEventAsync();
-                await bob.ModifyStore(s => s.PayJoinEnabled = true);
+                await bob.ModifyPayment(p => p.PayJoinEnabled = true);
                 var invoice = bob.BitPay.CreateInvoice(
-                    new Invoice() { Price = 0.1m, Currency = "BTC", FullNotifications = true });
+                    new Invoice { Price = 0.1m, Currency = "BTC", FullNotifications = true });
                 var invoiceBIP21 = new BitcoinUrlBuilder(invoice.CryptoInfo.First().PaymentUrls.BIP21,
                     tester.ExplorerClient.Network.NBitcoinNetwork);
 

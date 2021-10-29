@@ -3,6 +3,8 @@ using System.Text.Encodings.Web;
 using System.Threading.Tasks;
 using BTCPayServer.Abstractions.Constants;
 using BTCPayServer.Data;
+using BTCPayServer.Fido2;
+using BTCPayServer.Models;
 using BTCPayServer.Models.ManageViewModels;
 using BTCPayServer.Security.GreenField;
 using BTCPayServer.Services;
@@ -18,6 +20,7 @@ using Microsoft.Extensions.Logging;
 
 namespace BTCPayServer.Controllers
 {
+    
     [Authorize(AuthenticationSchemes = AuthenticationSchemes.Cookie)]
     [Route("[controller]/[action]")]
     public partial class ManageController : Controller
@@ -29,25 +32,25 @@ namespace BTCPayServer.Controllers
         private readonly UrlEncoder _urlEncoder;
         private readonly BTCPayServerEnvironment _btcPayServerEnvironment;
         private readonly APIKeyRepository _apiKeyRepository;
-        private readonly IAuthorizationService _authorizationService;
+        private readonly IAuthorizationService _authorizationService;        
+        private readonly Fido2Service _fido2Service;
         private readonly LinkGenerator _linkGenerator;
+        private readonly UserService _userService;
         readonly StoreRepository _StoreRepository;
-
-
-
+        
         public ManageController(
           UserManager<ApplicationUser> userManager,
           SignInManager<ApplicationUser> signInManager,
           EmailSenderFactory emailSenderFactory,
           ILogger<ManageController> logger,
           UrlEncoder urlEncoder,
-          BTCPayWalletProvider walletProvider,
           StoreRepository storeRepository,
-          IWebHostEnvironment env,
           BTCPayServerEnvironment btcPayServerEnvironment,
           APIKeyRepository apiKeyRepository,
           IAuthorizationService authorizationService,
-          LinkGenerator linkGenerator
+          Fido2Service fido2Service,
+          LinkGenerator linkGenerator,
+          UserService userService 
           )
         {
             _userManager = userManager;
@@ -58,7 +61,9 @@ namespace BTCPayServer.Controllers
             _btcPayServerEnvironment = btcPayServerEnvironment;
             _apiKeyRepository = apiKeyRepository;
             _authorizationService = authorizationService;
+            _fido2Service = fido2Service;
             _linkGenerator = linkGenerator;
+            _userService = userService;
             _StoreRepository = storeRepository;
         }
 
@@ -235,6 +240,21 @@ namespace BTCPayServer.Controllers
             TempData[WellKnownTempData.SuccessMessage] = "Your password has been set.";
 
             return RedirectToAction(nameof(SetPassword));
+        }
+
+        [HttpPost()]
+        public async Task<IActionResult> DeleteUserPost()
+        {
+            var user = await _userManager.GetUserAsync(User);
+            if (user == null)
+            {
+                return NotFound();
+            }
+
+            await _userService.DeleteUserAndAssociatedData(user);
+            TempData[WellKnownTempData.SuccessMessage] = "Account successfully deleted.";
+            await _signInManager.SignOutAsync();
+            return RedirectToAction(nameof(AccountController.Login), "Account");
         }
 
 

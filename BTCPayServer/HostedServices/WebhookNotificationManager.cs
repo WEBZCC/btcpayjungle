@@ -9,6 +9,7 @@ using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
 using BTCPayServer.Client.Models;
+using BTCPayServer.Controllers.GreenField;
 using BTCPayServer.Data;
 using BTCPayServer.Events;
 using BTCPayServer.Logging;
@@ -183,6 +184,8 @@ namespace BTCPayServer.HostedServices
                     return new WebhookInvoiceEvent(WebhookEventType.InvoiceCreated);
                 case WebhookEventType.InvoiceReceivedPayment:
                     return new WebhookInvoiceReceivedPaymentEvent(WebhookEventType.InvoiceReceivedPayment);
+                case WebhookEventType.InvoicePaymentSettled:
+                    return new WebhookInvoicePaymentSettledEvent(WebhookEventType.InvoicePaymentSettled);
                 case WebhookEventType.InvoiceProcessing:
                     return new WebhookInvoiceProcessingEvent(WebhookEventType.InvoiceProcessing);
                 case WebhookEventType.InvoiceExpired:
@@ -213,10 +216,9 @@ namespace BTCPayServer.HostedServices
                 case InvoiceEventCode.Created:
                     return new WebhookInvoiceEvent(WebhookEventType.InvoiceCreated);
                 case InvoiceEventCode.Expired:
-                case InvoiceEventCode.ExpiredPaidPartial:
                     return new WebhookInvoiceExpiredEvent(WebhookEventType.InvoiceExpired)
                     {
-                        PartiallyPaid = eventCode == InvoiceEventCode.ExpiredPaidPartial
+                        PartiallyPaid = invoiceEvent.PaidPartial
                     };
                 case InvoiceEventCode.FailedToConfirm:
                 case InvoiceEventCode.MarkedInvalid:
@@ -232,7 +234,17 @@ namespace BTCPayServer.HostedServices
                 case InvoiceEventCode.ReceivedPayment:
                     return new WebhookInvoiceReceivedPaymentEvent(WebhookEventType.InvoiceReceivedPayment)
                     {
-                        AfterExpiration = invoiceEvent.Invoice.Status.ToModernStatus() == InvoiceStatus.Expired || invoiceEvent.Invoice.Status.ToModernStatus() == InvoiceStatus.Invalid
+                        AfterExpiration = invoiceEvent.Invoice.Status.ToModernStatus() == InvoiceStatus.Expired || invoiceEvent.Invoice.Status.ToModernStatus() == InvoiceStatus.Invalid,
+                        PaymentMethod = invoiceEvent.Payment.GetPaymentMethodId().ToStringNormalized(),
+                        Payment = GreenFieldInvoiceController.ToPaymentModel(invoiceEvent.Invoice, invoiceEvent.Payment)
+                    };
+                case InvoiceEventCode.PaymentSettled:
+                    return new WebhookInvoiceReceivedPaymentEvent(WebhookEventType.InvoicePaymentSettled)
+                    {
+                        AfterExpiration = invoiceEvent.Invoice.Status.ToModernStatus() == InvoiceStatus.Expired || invoiceEvent.Invoice.Status.ToModernStatus() == InvoiceStatus.Invalid,
+                        PaymentMethod = invoiceEvent.Payment.GetPaymentMethodId().ToStringNormalized(),
+                        Payment = GreenFieldInvoiceController.ToPaymentModel(invoiceEvent.Invoice, invoiceEvent.Payment),
+                        OverPaid = invoiceEvent.Invoice.ExceptionStatus == InvoiceExceptionStatus.PaidOver,
                     };
                 default:
                     return null;

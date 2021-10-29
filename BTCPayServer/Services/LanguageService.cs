@@ -6,6 +6,7 @@ using System.Linq;
 using BTCPayServer.Client.Models;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc.Rendering;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using Newtonsoft.Json.Serialization;
@@ -51,8 +52,22 @@ namespace BTCPayServer.Services
             return _languages;
         }
 
+        public IEnumerable<SelectListItem> GetLanguageSelectListItems()
+        {
+              IEnumerable<SelectListItem> items = GetLanguages().Select(l => new SelectListItem
+              {
+                  Value = l.Code, 
+                  Text = l.DisplayName,
+                  Disabled = false
+              }).OrderBy(lang => lang.Text);
+              
+            return items;
+        }
+
         public Language FindLanguageInAcceptLanguageHeader(string acceptLanguageHeader)
         {
+            if (acceptLanguageHeader is null)
+                return null;
             IDictionary<string, float> acceptedLocales = new Dictionary<string, float>();
             var locales = acceptLanguageHeader.Split(',', StringSplitOptions.RemoveEmptyEntries);
             for (int i = 0; i < locales.Length; i++)

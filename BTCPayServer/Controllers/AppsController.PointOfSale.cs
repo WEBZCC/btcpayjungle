@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using BTCPayServer.Data;
 using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.RegularExpressions;
@@ -17,7 +18,6 @@ namespace BTCPayServer.Controllers
             public PointOfSaleSettings()
             {
                 Title = "Tea shop";
-                Currency = "USD";
                 Template =
                     "green tea:\n" +
                     "  price: 1\n" +
@@ -56,6 +56,7 @@ namespace BTCPayServer.Controllers
                 ShowCustomAmount = true;
                 ShowDiscount = true;
                 EnableTips = true;
+                RequiresRefundEmail = RequiresRefundEmail.InheritFromStore;
             }
             public string Title { get; set; }
             public string Currency { get; set; }
@@ -65,6 +66,7 @@ namespace BTCPayServer.Controllers
             public bool ShowCustomAmount { get; set; }
             public bool ShowDiscount { get; set; }
             public bool EnableTips { get; set; }
+            public RequiresRefundEmail RequiresRefundEmail { get; set; }
 
             public const string BUTTON_TEXT_DEF = "Buy for {0}";
             public string ButtonText { get; set; } = BUTTON_TEXT_DEF;
@@ -96,7 +98,6 @@ namespace BTCPayServer.Controllers
             var settings = app.GetSettings<PointOfSaleSettings>();
             settings.DefaultView = settings.EnableShoppingCart ? PosViewType.Cart : settings.DefaultView;
             settings.EnableShoppingCart = false;
-
             var vm = new UpdatePointOfSaleViewModel
             {
                 Id = appId,
@@ -119,11 +120,12 @@ namespace BTCPayServer.Controllers
                 NotificationUrl = settings.NotificationUrl,
                 RedirectUrl = settings.RedirectUrl,
                 SearchTerm = $"storeid:{app.StoreDataId}",
-                RedirectAutomatically = settings.RedirectAutomatically.HasValue ? settings.RedirectAutomatically.Value ? "true" : "false" : ""
+                RedirectAutomatically = settings.RedirectAutomatically.HasValue ? settings.RedirectAutomatically.Value ? "true" : "false" : "",
+                RequiresRefundEmail = settings.RequiresRefundEmail
             };
             if (HttpContext?.Request != null)
             {
-                var appUrl = HttpContext.Request.GetAbsoluteRoot().WithTrailingSlash() + $"apps/{appId}/pos";
+                var appUrl = HttpContext.Request.GetAbsoluteUri($"/apps/{appId}/pos");
                 var encoder = HtmlEncoder.Default;
                 if (settings.ShowCustomAmount)
                 {
@@ -140,6 +142,7 @@ namespace BTCPayServer.Controllers
                 }
                 try
                 {
+
                     var items = _AppService.Parse(settings.Template, settings.Currency);
                     var builder = new StringBuilder();
                     builder.AppendLine($"<form method=\"POST\" action=\"{encoder.Encode(appUrl)}\">");
@@ -162,11 +165,14 @@ namespace BTCPayServer.Controllers
         [Route("{appId}/settings/pos")]
         public async Task<IActionResult> UpdatePointOfSale(string appId, UpdatePointOfSaleViewModel vm)
         {
+            var app = await GetOwnedApp(appId, AppType.PointOfSale);
+            if (app == null)
+                return NotFound();
             if (!ModelState.IsValid)
             {
                 return View(vm);
             }
-            
+            vm.Currency = await GetStoreDefaultCurrentIfEmpty(app.StoreDataId, vm.Currency);
             if (_currencies.GetCurrencyData(vm.Currency, false) == null)
                 ModelState.AddModelError(nameof(vm.Currency), "Invalid currency");
             try
@@ -181,9 +187,6 @@ namespace BTCPayServer.Controllers
             {
                 return View(vm);
             }
-            var app = await GetOwnedApp(appId, AppType.PointOfSale);
-            if (app == null)
-                return NotFound();
             app.SetSettings(new PointOfSaleSettings
             {
                 Title = vm.Title,
@@ -191,7 +194,7 @@ namespace BTCPayServer.Controllers
                 ShowCustomAmount = vm.ShowCustomAmount,
                 ShowDiscount = vm.ShowDiscount,
                 EnableTips = vm.EnableTips,
-                Currency = vm.Currency.ToUpperInvariant(),
+                Currency = vm.Currency,
                 Template = vm.Template,
                 ButtonText = vm.ButtonText,
                 CustomButtonText = vm.CustomButtonText,
@@ -202,7 +205,8 @@ namespace BTCPayServer.Controllers
                 RedirectUrl = vm.RedirectUrl,
                 Description = vm.Description,
                 EmbeddedCSS = vm.EmbeddedCSS,
-                RedirectAutomatically = string.IsNullOrEmpty(vm.RedirectAutomatically) ? (bool?)null : bool.Parse(vm.RedirectAutomatically)
+                RedirectAutomatically = string.IsNullOrEmpty(vm.RedirectAutomatically) ? (bool?)null : bool.Parse(vm.RedirectAutomatically),
+                RequiresRefundEmail = vm.RequiresRefundEmail,
             });
             await _AppService.UpdateOrCreateApp(app);
             TempData[WellKnownTempData.SuccessMessage] = "App updated";

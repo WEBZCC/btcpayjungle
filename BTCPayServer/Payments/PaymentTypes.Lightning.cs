@@ -13,7 +13,7 @@ namespace BTCPayServer.Payments
     {
         public static LightningPaymentType Instance { get; } = new LightningPaymentType();
 
-        private LightningPaymentType() { }
+        private protected LightningPaymentType() { }
 
         public override string ToPrettyString() => "Off-Chain";
         public override string GetId() => "LightningLike";
@@ -65,12 +65,20 @@ namespace BTCPayServer.Payments
         }
 
         public override string InvoiceViewPaymentPartialName { get; } = "Lightning/ViewLightningLikePaymentData";
-        public override object GetGreenfieldData(ISupportedPaymentMethod supportedPaymentMethod)
+
+        public override object GetGreenfieldData(ISupportedPaymentMethod supportedPaymentMethod, bool canModifyStore)
         {
             if (supportedPaymentMethod is LightningSupportedPaymentMethod lightningSupportedPaymentMethod)
                 return new LightningNetworkPaymentMethodBaseData()
                 {
-                    ConnectionString = lightningSupportedPaymentMethod.GetDisplayableConnectionString()
+                    ConnectionString = lightningSupportedPaymentMethod.IsInternalNode
+                        ?
+                        lightningSupportedPaymentMethod.GetDisplayableConnectionString()
+                        :
+                        canModifyStore
+                            ? lightningSupportedPaymentMethod.GetDisplayableConnectionString()
+                            :
+                            "*NEED CanModifyStoreSettings PERMISSION TO VIEW*"
                 };
             return null;
         }
@@ -78,6 +86,15 @@ namespace BTCPayServer.Payments
         public override bool IsPaymentType(string paymentType)
         {
             return paymentType?.Equals("offchain", StringComparison.InvariantCultureIgnoreCase) is true || base.IsPaymentType(paymentType);
+        }
+
+        public override void PopulateCryptoInfo(PaymentMethod details, InvoiceCryptoInfo invoiceCryptoInfo, string serverUrl)
+        {
+            invoiceCryptoInfo.PaymentUrls = new InvoiceCryptoInfo.InvoicePaymentUrls()
+            {
+                BOLT11 = GetPaymentLink(details.Network, details.GetPaymentMethodDetails(), invoiceCryptoInfo.Due,
+                    serverUrl)
+            };
         }
     }
 }

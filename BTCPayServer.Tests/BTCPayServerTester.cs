@@ -85,7 +85,7 @@ namespace BTCPayServer.Tests
 
         public HashSet<string> Chains { get; set; } = new HashSet<string>() { "BTC" };
         public bool UseLightning { get; set; }
-        public bool AllowAdminRegistration { get; set; } = true;
+        public bool CheatMode { get; set; } = true;
         public bool DisableRegistration { get; set; } = false;
         public async Task StartAsync()
         {
@@ -128,13 +128,13 @@ namespace BTCPayServer.Tests
                 config.AppendLine($"lbtc.explorer.url={LBTCNBXplorerUri.AbsoluteUri}");
                 config.AppendLine($"lbtc.explorer.cookiefile=0");
             }
-            if (AllowAdminRegistration)
-                config.AppendLine("allow-admin-registration=1");
+            if (CheatMode)
+                config.AppendLine("cheatmode=1");
 
             config.AppendLine($"torrcfile={TestUtils.GetTestDataFullPath("Tor/torrc")}");
             config.AppendLine($"socksendpoint={SocksEndpoint}");
             config.AppendLine($"debuglog=debug.log");
-
+            config.AppendLine($"nocsp={NoCSP.ToString().ToLowerInvariant()}");
 
             if (!string.IsNullOrEmpty(SSHPassword) && string.IsNullOrEmpty(SSHKeyFile))
                 config.AppendLine($"sshpassword={SSHPassword}");
@@ -198,6 +198,7 @@ namespace BTCPayServer.Tests
 
                 coinAverageMock = new MockRateProvider();
                 coinAverageMock.ExchangeRates.Add(new PairRate(CurrencyPair.Parse("BTC_USD"), new BidAsk(5000m)));
+                coinAverageMock.ExchangeRates.Add(new PairRate(CurrencyPair.Parse("BTC_EUR"), new BidAsk(4000m)));
                 coinAverageMock.ExchangeRates.Add(new PairRate(CurrencyPair.Parse("BTC_CAD"), new BidAsk(4500m)));
                 coinAverageMock.ExchangeRates.Add(new PairRate(CurrencyPair.Parse("BTC_LTC"), new BidAsk(162m)));
                 coinAverageMock.ExchangeRates.Add(new PairRate(CurrencyPair.Parse("LTC_USD"), new BidAsk(500m)));
@@ -283,6 +284,8 @@ namespace BTCPayServer.Tests
         public string SSHPassword { get; internal set; }
         public string SSHKeyFile { get; internal set; }
         public string SSHConnection { get; set; }
+        public bool NoCSP { get; set; }
+
         public T GetController<T>(string userId = null, string storeId = null, bool isAdmin = false) where T : Controller
         {
             var context = new DefaultHttpContext();

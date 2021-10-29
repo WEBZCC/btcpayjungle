@@ -14,7 +14,6 @@ namespace BTCPayServer.Models.AppViewModels
         [Required]
         [MaxLength(30)]
         public string Title { get; set; }
-        [Required]
         [MaxLength(5)]
         public string Currency { get; set; }
         public string Template { get; set; }
@@ -90,5 +89,7 @@ namespace BTCPayServer.Models.AppViewModels
         [Display(Name = "Custom CSS Code")]
         public string EmbeddedCSS { get; set; }
         public string Description { get; set; }
+        [Display(Name = "Require refund email on checkout")]
+        public RequiresRefundEmail RequiresRefundEmail { get; set; } = RequiresRefundEmail.InheritFromStore;
     }
 }

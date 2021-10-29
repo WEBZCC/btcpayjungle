@@ -2,12 +2,13 @@ using System;
 using System.Globalization;
 using System.Linq;
 using BTCPayServer.Payments.Bitcoin;
-using BTCPayServer.Services;
 using BTCPayServer.Services.Invoices;
 using NBitcoin;
 using BTCPayServer.BIP78.Sender;
 using BTCPayServer.Client.Models;
+using NBitpayClient;
 using Newtonsoft.Json.Linq;
+using InvoiceCryptoInfo = BTCPayServer.Services.Invoices.InvoiceCryptoInfo;
 
 namespace BTCPayServer.Payments
 {
@@ -85,7 +86,7 @@ namespace BTCPayServer.Payments
         }
 
         public override string InvoiceViewPaymentPartialName { get; } = "Bitcoin/ViewBitcoinLikePaymentData";
-        public override object GetGreenfieldData(ISupportedPaymentMethod supportedPaymentMethod)
+        public override object GetGreenfieldData(ISupportedPaymentMethod supportedPaymentMethod, bool canModifyStore)
         {
             if (supportedPaymentMethod is DerivationSchemeSettings derivationSchemeSettings)
                 return new OnChainPaymentMethodBaseData()
@@ -100,6 +101,15 @@ namespace BTCPayServer.Payments
         public override bool IsPaymentType(string paymentType)
         {
             return string.IsNullOrEmpty(paymentType) || base.IsPaymentType(paymentType);
+        }
+
+        public override void PopulateCryptoInfo(PaymentMethod details, InvoiceCryptoInfo cryptoInfo,
+            string serverUrl)
+        {
+            cryptoInfo.PaymentUrls = new InvoiceCryptoInfo.InvoicePaymentUrls()
+            {
+                BIP21 = GetPaymentLink(details.Network, details.GetPaymentMethodDetails(), cryptoInfo.Due, serverUrl),
+            };
         }
     }
 }

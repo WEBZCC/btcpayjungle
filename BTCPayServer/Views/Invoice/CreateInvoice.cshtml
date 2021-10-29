@@ -1,4 +1,5 @@
 @model BTCPayServer.Models.InvoicingModels.CreateInvoiceModel
+@using BTCPayServer.Services.Apps
 @{
     ViewData.SetActivePageAndTitle(InvoiceNavPages.Create, "Create an invoice");
 }
@@ -40,8 +41,8 @@
                         <span asp-validation-for="Amount" class="text-danger"></span>
                     </div>
                     <div class="form-group">
-                        <label asp-for="Currency" class="form-label" data-required></label>
-                        <input asp-for="Currency" class="form-control" required />
+                        <label asp-for="Currency" class="form-label"></label>
+                        <input asp-for="Currency" class="form-control" />
                         <span asp-validation-for="Currency" class="text-danger"></span>
                     </div>
                     <div class="form-group">
@@ -65,12 +66,17 @@
                         <span asp-validation-for="BuyerEmail" class="text-danger"></span>
                     </div>
                     <div class="form-group">
+                        <label asp-for="RequiresRefundEmail" class="form-check-label"></label>
+                        <select asp-for="RequiresRefundEmail" asp-items="@Html.GetEnumSelectList<RequiresRefundEmail>()" class="form-select"></select>
+                        <span asp-validation-for="RequiresRefundEmail" class="text-danger"></span>
+                    </div>
+                    <div class="form-group">
                         <label asp-for="NotificationUrl" class="form-label"></label>
                         <input asp-for="NotificationUrl" class="form-control" />
                         <span asp-validation-for="NotificationUrl" class="text-danger"></span>
                     </div>
                     <div class="form-group">
-                        <label asp-for="StoreId" class="form-label"></label>
+                        <label asp-for="Stores" class="form-label"></label>
                         <select asp-for="StoreId" asp-items="Model.Stores" class="form-select"></select>
                         <span asp-validation-for="StoreId" class="text-danger"></span>
                     </div>
@@ -78,6 +84,18 @@
                         <label asp-for="SupportedTransactionCurrencies" class="form-label"></label>
                         <select asp-for="SupportedTransactionCurrencies" asp-items="Model.AvailablePaymentMethods" class="form-select" multiple="multiple"></select>
                         <span asp-validation-for="SupportedTransactionCurrencies" class="text-danger"></span>
+                    </div>
+                    <div class="form-group">
+                        <label asp-for="DefaultPaymentMethod" class="form-label"></label>
+                        <select asp-for="DefaultPaymentMethod" asp-items="Model.AvailablePaymentMethods" class="form-select">
+                            <option value="" selected>Store's default settings</option>
+                        </select>
+                        <span asp-validation-for="DefaultPaymentMethod" class="text-danger"></span>
+                    </div>
+                    <div class="form-group">
+                        <label asp-for="NotificationEmail" class="form-label"></label>
+                        <input asp-for="NotificationEmail" class="form-control" />
+                        <span asp-validation-for="NotificationEmail" class="text-danger"></span>
                     </div>
                     <div class="form-group">
                         <input type="submit" value="Create" class="btn btn-primary" id="Create" />

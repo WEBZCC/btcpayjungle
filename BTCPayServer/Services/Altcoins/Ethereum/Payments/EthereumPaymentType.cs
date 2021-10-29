@@ -53,7 +53,7 @@ namespace BTCPayServer.Services.Altcoins.Ethereum.Payments
         }
 
         public override string InvoiceViewPaymentPartialName { get; }= "Ethereum/ViewEthereumLikePaymentData";
-        public override object GetGreenfieldData(ISupportedPaymentMethod supportedPaymentMethod)
+        public override object GetGreenfieldData(ISupportedPaymentMethod supportedPaymentMethod, bool canModifyStore)
         {
             if (supportedPaymentMethod is EthereumSupportedPaymentMethod ethereumSupportedPaymentMethod)
             {
@@ -65,6 +65,10 @@ namespace BTCPayServer.Services.Altcoins.Ethereum.Payments
             }
 
             return null;
+        }
+
+        public override void PopulateCryptoInfo(PaymentMethod details, InvoiceCryptoInfo invoiceCryptoInfo, string serverUrl)
+        {
         }
     }
 }

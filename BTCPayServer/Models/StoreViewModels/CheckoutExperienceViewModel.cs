@@ -21,7 +21,7 @@ namespace BTCPayServer.Models.StoreViewModels
         public void SetLanguages(LanguageService langService, string defaultLang)
         {
             defaultLang = langService.GetLanguages().Any(language => language.Code == defaultLang) ? defaultLang : "en";
-            var choices = langService.GetLanguages().Select(o => new Format() { Name = o.DisplayName, Value = o.Code }).ToArray();
+            var choices = langService.GetLanguages().Select(o => new Format() { Name = o.DisplayName, Value = o.Code }).ToArray().OrderBy(o => o.Name);
             var chosen = choices.FirstOrDefault(f => f.Value == defaultLang) ?? choices.FirstOrDefault();
             Languages = new SelectList(choices, nameof(chosen.Value), nameof(chosen.Name), chosen);
             DefaultLang = chosen.Value;
@@ -34,27 +34,11 @@ namespace BTCPayServer.Models.StoreViewModels
         [Display(Name = "Requires a refund email")]
         public bool RequiresRefundEmail { get; set; }
 
-        [Display(Name = "Display Lightning payment amounts in Satoshis")]
-        public bool LightningAmountInSatoshi { get; set; }
-
-        [Display(Name = "Add hop hints for private channels to the Lightning invoice")]
-        public bool LightningPrivateRouteHints { get; set; }
-
-        [Display(Name = "Include Lightning invoice fallback to on-chain BIP21 payment URL")]
-        public bool OnChainWithLnInvoiceFallback { get; set; }
-
         [Display(Name = "Only enable the payment method after user explicitly chooses it")]
         public bool LazyPaymentMethods { get; set; }
 
         [Display(Name = "Redirect invoice to redirect url automatically after paid")]
         public bool RedirectAutomatically { get; set; }
-
-        [Display(Name = "Show recommended fee")]
-        public bool ShowRecommendedFee { get; set; }
-
-        [Display(Name = "Recommended fee confirmation target blocks")]
-        [Range(1, double.PositiveInfinity)]
-        public int RecommendedFeeBlockTarget { get; set; }
         
         [Display(Name = "Auto-detect language on checkout")]
         public bool AutoDetectLanguage { get; set; }

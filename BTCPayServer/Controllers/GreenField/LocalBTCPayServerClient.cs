@@ -17,7 +17,6 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 using NBitcoin;
 using NBXplorer.Models;
-using YamlDotNet.Core.Tokens;
 using InvoiceData = BTCPayServer.Client.Models.InvoiceData;
 using Language = BTCPayServer.Client.Models.Language;
 using NotificationData = BTCPayServer.Client.Models.NotificationData;
@@ -37,6 +36,7 @@ namespace BTCPayServer.Controllers.GreenField
         private readonly StoreOnChainPaymentMethodsController _chainPaymentMethodsController;
         private readonly StoreOnChainWalletsController _storeOnChainWalletsController;
         private readonly StoreLightningNetworkPaymentMethodsController _storeLightningNetworkPaymentMethodsController;
+        private readonly StoreLNURLPayPaymentMethodsController _storeLnurlPayPaymentMethodsController;
         private readonly HealthController _healthController;
         private readonly GreenFieldPaymentRequestsController _paymentRequestController;
         private readonly ApiKeysController _apiKeysController;
@@ -58,6 +58,7 @@ namespace BTCPayServer.Controllers.GreenField
             StoreOnChainPaymentMethodsController chainPaymentMethodsController,
             StoreOnChainWalletsController storeOnChainWalletsController,
             StoreLightningNetworkPaymentMethodsController storeLightningNetworkPaymentMethodsController,
+            StoreLNURLPayPaymentMethodsController storeLnurlPayPaymentMethodsController,
             HealthController healthController,
             GreenFieldPaymentRequestsController paymentRequestController,
             ApiKeysController apiKeysController,
@@ -79,6 +80,7 @@ namespace BTCPayServer.Controllers.GreenField
             _chainPaymentMethodsController = chainPaymentMethodsController;
             _storeOnChainWalletsController = storeOnChainWalletsController;
             _storeLightningNetworkPaymentMethodsController = storeLightningNetworkPaymentMethodsController;
+            _storeLnurlPayPaymentMethodsController = storeLnurlPayPaymentMethodsController;
             _healthController = healthController;
             _paymentRequestController = paymentRequestController;
             _apiKeysController = apiKeysController;
@@ -141,6 +143,7 @@ namespace BTCPayServer.Controllers.GreenField
                 _storeLightningNodeApiController,
                 _internalLightningNodeApiController,
                 _storeLightningNetworkPaymentMethodsController,
+                _storeLnurlPayPaymentMethodsController,
                 _greenFieldInvoiceController,
                 _greenFieldServerInfoController,
                 _storeWebhooksController,
@@ -165,6 +168,7 @@ namespace BTCPayServer.Controllers.GreenField
         private readonly StoreLightningNodeApiController _storeLightningNodeApiController;
         private readonly InternalLightningNodeApiController _lightningNodeApiController;
         private readonly StoreLightningNetworkPaymentMethodsController _storeLightningNetworkPaymentMethodsController;
+        private readonly StoreLNURLPayPaymentMethodsController _storeLnurlPayPaymentMethodsController;
         private readonly GreenFieldInvoiceController _greenFieldInvoiceController;
         private readonly GreenFieldServerInfoController _greenFieldServerInfoController;
         private readonly StoreWebhooksController _storeWebhooksController;
@@ -183,6 +187,7 @@ namespace BTCPayServer.Controllers.GreenField
             StoreLightningNodeApiController storeLightningNodeApiController,
             InternalLightningNodeApiController lightningNodeApiController,
             StoreLightningNetworkPaymentMethodsController storeLightningNetworkPaymentMethodsController,
+            StoreLNURLPayPaymentMethodsController storeLnurlPayPaymentMethodsController,
             GreenFieldInvoiceController greenFieldInvoiceController,
             GreenFieldServerInfoController greenFieldServerInfoController,
             StoreWebhooksController storeWebhooksController,
@@ -202,6 +207,7 @@ namespace BTCPayServer.Controllers.GreenField
             _storeLightningNodeApiController = storeLightningNodeApiController;
             _lightningNodeApiController = lightningNodeApiController;
             _storeLightningNetworkPaymentMethodsController = storeLightningNetworkPaymentMethodsController;
+            _storeLnurlPayPaymentMethodsController = storeLnurlPayPaymentMethodsController;
             _greenFieldInvoiceController = greenFieldInvoiceController;
             _greenFieldServerInfoController = greenFieldServerInfoController;
             _storeWebhooksController = storeWebhooksController;
@@ -518,16 +524,21 @@ namespace BTCPayServer.Controllers.GreenField
         }
 
         public override async Task<OnChainPaymentMethodData> UpdateStoreOnChainPaymentMethod(string storeId,
-            string cryptoCode, OnChainPaymentMethodData paymentMethod,
+            string cryptoCode, UpdateOnChainPaymentMethodRequest paymentMethod,
             CancellationToken token = default)
         {
             return GetFromActionResult<OnChainPaymentMethodData>(
-                await _chainPaymentMethodsController.UpdateOnChainPaymentMethod(storeId, cryptoCode, paymentMethod));
+                await _chainPaymentMethodsController.UpdateOnChainPaymentMethod(storeId, cryptoCode, new UpdateOnChainPaymentMethodRequest(
+                    enabled: paymentMethod.Enabled,
+                    label: paymentMethod.Label,
+                    accountKeyPath: paymentMethod.AccountKeyPath,
+                    derivationScheme: paymentMethod.DerivationScheme
+                )));
         }
 
         public override Task<OnChainPaymentMethodPreviewResultData> PreviewProposedStoreOnChainPaymentMethodAddresses(
             string storeId, string cryptoCode,
-            OnChainPaymentMethodData paymentMethod, int offset = 0, int amount = 10, CancellationToken token = default)
+            UpdateOnChainPaymentMethodRequest paymentMethod, int offset = 0, int amount = 10, CancellationToken token = default)
         {
             return Task.FromResult(GetFromActionResult<OnChainPaymentMethodPreviewResultData>(
                 _chainPaymentMethodsController.GetProposedOnChainPaymentMethodPreview(storeId, cryptoCode,
@@ -741,7 +752,39 @@ namespace BTCPayServer.Controllers.GreenField
         {
             return GetFromActionResult<StoreData>(await _storesController.UpdateStore(storeId, request));
         }
+        
+        public override Task<IEnumerable<LNURLPayPaymentMethodData>>
+            GetStoreLNURLPayPaymentMethods(string storeId, bool? enabled,
+                CancellationToken token = default)
+        {
+            return Task.FromResult(GetFromActionResult(
+                _storeLnurlPayPaymentMethodsController.GetLNURLPayPaymentMethods(storeId, enabled)));
+        }
 
+        public override Task<LNURLPayPaymentMethodData> GetStoreLNURLPayPaymentMethod(
+            string storeId, string cryptoCode, CancellationToken token = default)
+        {
+            return Task.FromResult(GetFromActionResult<LNURLPayPaymentMethodData>(
+                _storeLnurlPayPaymentMethodsController.GetLNURLPayPaymentMethod(storeId, cryptoCode)));
+        }
+
+        public override async Task RemoveStoreLNURLPayPaymentMethod(string storeId, string cryptoCode,
+            CancellationToken token = default)
+        {
+            HandleActionResult(
+                await _storeLnurlPayPaymentMethodsController.RemoveLNURLPayPaymentMethod(storeId,
+                    cryptoCode));
+        }
+
+        public override async Task<LNURLPayPaymentMethodData> UpdateStoreLNURLPayPaymentMethod(
+            string storeId, string cryptoCode,
+            LNURLPayPaymentMethodData paymentMethod, CancellationToken token = default)
+        {
+            return GetFromActionResult<LNURLPayPaymentMethodData>(await
+                _storeLnurlPayPaymentMethodsController.UpdateLNURLPayPaymentMethod(storeId, cryptoCode,
+                    paymentMethod));
+        }
+        
         public override Task<IEnumerable<LightningNetworkPaymentMethodData>>
             GetStoreLightningNetworkPaymentMethods(string storeId, bool? enabled,
                 CancellationToken token = default)
@@ -767,11 +810,11 @@ namespace BTCPayServer.Controllers.GreenField
 
         public override async Task<LightningNetworkPaymentMethodData> UpdateStoreLightningNetworkPaymentMethod(
             string storeId, string cryptoCode,
-            LightningNetworkPaymentMethodData paymentMethod, CancellationToken token = default)
+            UpdateLightningNetworkPaymentMethodRequest paymentMethod, CancellationToken token = default)
         {
             return GetFromActionResult<LightningNetworkPaymentMethodData>(await
                 _storeLightningNetworkPaymentMethodsController.UpdateLightningNetworkPaymentMethod(storeId, cryptoCode,
-                    paymentMethod));
+                    new UpdateLightningNetworkPaymentMethodRequest(paymentMethod.ConnectionString, paymentMethod.Enabled)));
         }
 
         public override async Task<IEnumerable<InvoiceData>> GetInvoices(string storeId, string[] orderId = null,
@@ -873,16 +916,9 @@ namespace BTCPayServer.Controllers.GreenField
             return Task.FromResult(GetFromActionResult<PermissionMetadata[]>(_homeController.Permissions()));
         }
 
-        public override async Task<LightningNetworkPaymentMethodData> UpdateStoreLightningNetworkPaymentMethodToInternalNode(string storeId, string cryptoCode,
-            CancellationToken token = default)
+        public override async Task<Dictionary<string, GenericPaymentMethodData>> GetStorePaymentMethods(string storeId, bool? enabled = null, CancellationToken token = default)
         {
-            //nothing to change, just local client sugar
-            return await base.UpdateStoreLightningNetworkPaymentMethodToInternalNode(storeId, cryptoCode, token);
-        }
-
-        public override Task<Dictionary<string, GenericPaymentMethodData>> GetStorePaymentMethods(string storeId, bool? enabled = null, CancellationToken token = default)
-        {
-            return Task.FromResult(GetFromActionResult(_storePaymentMethodsController.GetStorePaymentMethods(storeId, enabled)));
+            return GetFromActionResult(await _storePaymentMethodsController.GetStorePaymentMethods(storeId, enabled));
         }
 
         public override async Task<OnChainPaymentMethodDataWithSensitiveData> GenerateOnChainWallet(string storeId, string cryptoCode, GenerateOnChainWalletRequest request,

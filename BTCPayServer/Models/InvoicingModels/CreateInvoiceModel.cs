@@ -4,22 +4,16 @@ using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 using BTCPayServer.Validation;
 using Microsoft.AspNetCore.Mvc.Rendering;
+using BTCPayServer.Services.Apps;
 
 namespace BTCPayServer.Models.InvoicingModels
 {
     public class CreateInvoiceModel
     {
-        public CreateInvoiceModel()
-        {
-            Currency = "USD";
-        }
-
         public decimal? Amount
         {
             get; set;
         }
-
-        [Required]
         public string Currency
         {
             get; set;
@@ -44,6 +38,12 @@ namespace BTCPayServer.Models.InvoicingModels
             get; set;
         }
 
+        [Display(Name = "Default payment method on checkout")]
+        public string DefaultPaymentMethod
+        {
+            get; set;
+        }
+
         [DisplayName("POS Data")]
         public string PosData
         {
@@ -64,6 +64,7 @@ namespace BTCPayServer.Models.InvoicingModels
             get; set;
         }
 
+        [DisplayName("Store")]
         public SelectList Stores
         {
             get; set;
@@ -77,6 +78,19 @@ namespace BTCPayServer.Models.InvoicingModels
 
         [DisplayName("Available Payment Methods")]
         public SelectList AvailablePaymentMethods
+        {
+            get; set;
+        }
+
+        [EmailAddress]
+        [DisplayName("Notification Email")]
+        public string NotificationEmail
+        {
+            get; set;
+        }
+
+        [Display(Name = "Require Refund Email")]
+        public RequiresRefundEmail RequiresRefundEmail
         {
             get; set;
         }

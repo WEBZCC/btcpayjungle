@@ -118,7 +118,6 @@ namespace BTCPayServer.Controllers
         [HttpGet]
         public async Task<IActionResult> CreateUser()
         {
-            ViewData["AllowIsAdmin"] = _Options.AllowAdminRegistration;
             ViewData["AllowRequestEmailConfirmation"] = (await _SettingsRepository.GetPolicies()).RequiresConfirmedEmail;
 
             return View();
@@ -128,10 +127,9 @@ namespace BTCPayServer.Controllers
         [HttpPost]
         public async Task<IActionResult> CreateUser(RegisterFromAdminViewModel model)
         {
-            ViewData["AllowIsAdmin"] = _Options.AllowAdminRegistration;
             var requiresConfirmedEmail = (await _SettingsRepository.GetPolicies()).RequiresConfirmedEmail;
             ViewData["AllowRequestEmailConfirmation"] = requiresConfirmedEmail;
-            if (!_Options.AllowAdminRegistration)
+            if (!_Options.CheatMode)
                 model.IsAdmin = false;
             if (ModelState.IsValid)
             {
@@ -194,7 +192,7 @@ namespace BTCPayServer.Controllers
             return View(model);
         }
 
-        [Route("server/users/{userId}/delete")]
+        [HttpGet("server/users/{userId}/delete")]
         public async Task<IActionResult> DeleteUser(string userId)
         {
             var user = userId == null ? null : await _UserManager.FindByIdAsync(userId);
@@ -208,24 +206,19 @@ namespace BTCPayServer.Controllers
                 if (admins.Count == 1)
                 {
                     // return
-                    return View("Confirm", new ConfirmModel("Unable to Delete Last Admin",
-                        "This is the last Admin, so it can't be removed"));
+                    return View("Confirm", new ConfirmModel("Delete admin",
+                        "Unable to proceed: As the user <strong>{user.Email}</strong> is the last admin, it cannot be removed."));
                 }
 
-                return View("Confirm", new ConfirmModel("Delete Admin " + user.Email,
-                    "Are you sure you want to delete this Admin and delete all accounts, users and data associated with the server account?",
+                return View("Confirm", new ConfirmModel("Delete admin",
+                    $"The admin <strong>{user.Email}</strong> will be permanently deleted. This action will also delete all accounts, users and data associated with the server account. Are you sure?",
                     "Delete"));
             }
-            else
-            {
-                return View("Confirm", new ConfirmModel("Delete user " + user.Email,
-                                    "This user will be permanently deleted",
-                                    "Delete"));
-            }
+            
+            return View("Confirm", new ConfirmModel("Delete user", $"The user <strong>{user.Email}</strong> will be permanently deleted. Are you sure?", "Delete"));
         }
 
-        [Route("server/users/{userId}/delete")]
-        [HttpPost]
+        [HttpPost("server/users/{userId}/delete")]
         public async Task<IActionResult> DeleteUserPost(string userId)
         {
             var user = userId == null ? null : await _UserManager.FindByIdAsync(userId);

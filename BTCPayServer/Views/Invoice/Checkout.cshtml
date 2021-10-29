@@ -1,10 +1,14 @@
 @addTagHelper *, BundlerMinifier.TagHelpers
 @inject BTCPayServer.Services.LanguageService langService
+@inject BTCPayNetworkProvider BTCPayNetworkProvider
+@inject BTCPayServer.Services.BTCPayServerEnvironment env
 @inject PaymentMethodHandlerDictionary PaymentMethodHandlerDictionary
+@using NBitcoin
 @model PaymentModel
 @{
     Layout = null;
 }
+
 <!DOCTYPE html>
 <html>
 <head>
@@ -36,6 +40,7 @@
             body {
                 background: rgba(25, 25, 25, 0.9);
             }
+
             .close-icon {
                 display: flex;
             }
@@ -84,24 +89,31 @@
 
                         <select asp-for="DefaultLang"
                                 class="cmblang reverse invisible"
-                                onkeypress="if(event.keyCode==13){ $(this).click();}"
-                                onchange="changeLanguage($(this).val())"
-                                asp-items="@langService.GetLanguages().Select((language) => new SelectListItem(language.DisplayName,language.Code, false))"></select>
+                                asp-items="@langService.GetLanguageSelectListItems()"></select>
 
                         <script>
-                            var languageSelectorPrettyDropdown;
                             $(function () {
                                 // REVIEW: don't use initDropdown method but rather directly initialize select whenever you are using it
                                 $("#DefaultLang").val(startingLanguage);
-                                languageSelectorPrettyDropdown = initDropdown("#DefaultLang");
+                                var languageSelectorPrettyDropdown = initDropdown("#DefaultLang");
+
+                                languageSelectorPrettyDropdown.change(function () {
+                                    changeLanguage(languageSelectorPrettyDropdown.val());
+                                });
+
+                                languageSelectorPrettyDropdown.keypress(function (event) {
+                                    if (event.keyCode == 13) {
+                                        languageSelectorPrettyDropdown.click();
+                                    }
+                                });
                             });
 
                             function initDropdown(selector) {
                                 return $(selector).prettyDropdown({
-                                    classic: false,
+                                    classic: true,
                                     height: 32,
                                     reverse: true,
-                                    hoverIntent: 5000
+                                    hoverIntent: -1
                                 });
                             }
                         </script>
@@ -109,12 +121,16 @@
                     <div class="powered__by__btcpayserver">
                         Powered by <a target="_blank" href="https://github.com/Eskyee/btcpayjungle">BTCPay Jungle</a>
                     </div>
+                    @if (env.CheatMode)
+                    {
+                        <partial name="Checkout-Testing" />
+                    }
                 </div>
             </div>
         </div>
     </invoice>
     <script>
-    var availableLanguages = @Safe.Json(langService.GetLanguages().Select((language) => language.Code));;
+    var availableLanguages = @Safe.Json(langService.GetLanguages().Select((language) => language.Code));
     var defaultLang = @Safe.Json(Model.DefaultLang);
     var fallbackLanguage = "en";
     startingLanguage = computeStartingLanguage();
@@ -276,9 +292,12 @@
                     }
                     ws_uri += "//" + loc.host;
                     ws_uri += loc.pathname + "/status/ws?invoiceId=" + this.srvModel.invoiceId;
+
                     try {
                         socket = new WebSocket(ws_uri);
                         socket.onmessage = function (e) {
+                            if (e.data === "ping")
+                                return;
                             self.fetchData();
                         };
                         socket.onerror = function (e) {
@@ -370,10 +389,10 @@
     });
     </script>
 
-@foreach (var paymentMethodHandler in PaymentMethodHandlerDictionary.Select(handler => handler.GetCheckoutUISettings()).Where(settings => settings != null))
-{
-    <partial name="@paymentMethodHandler.ExtensionPartial" model="@Model"/>
-}
-@await Component.InvokeAsync("UiExtensionPoint" ,  new { location="checkout-end"})
+    @foreach (var paymentMethodHandler in PaymentMethodHandlerDictionary.Select(handler => handler.GetCheckoutUISettings()).Where(settings => settings != null))
+    {
+        <partial name="@paymentMethodHandler.ExtensionPartial" model="@Model" />
+    }
+    @await Component.InvokeAsync("UiExtensionPoint", new { location = "checkout-end", model = Model })
 </body>
 </html>

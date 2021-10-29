@@ -1,4 +1,5 @@
 using System;
+using BTCPayServer.Data;
 using System.Linq;
 using System.Threading.Tasks;
 using BTCPayServer.Models.AppViewModels;
@@ -55,6 +56,7 @@ namespace BTCPayServer.Controllers
                 AppId = appId,
                 SearchTerm = app.TagAllInvoices ? $"storeid:{app.StoreDataId}" : $"orderid:{AppService.GetCrowdfundOrderId(appId)}",
                 DisplayPerksRanking = settings.DisplayPerksRanking,
+                DisplayPerksValue = settings.DisplayPerksValue,
                 SortPerksByPopularity = settings.SortPerksByPopularity,
                 Sounds = string.Join(Environment.NewLine, settings.Sounds),
                 AnimationColors = string.Join(Environment.NewLine, settings.AnimationColors)
@@ -65,7 +67,11 @@ namespace BTCPayServer.Controllers
         [Route("{appId}/settings/crowdfund")]
         public async Task<IActionResult> UpdateCrowdfund(string appId, UpdateCrowdfundViewModel vm, string command)
         {
-            if (!string.IsNullOrEmpty(vm.TargetCurrency) && _currencies.GetCurrencyData(vm.TargetCurrency, false) == null)
+            var app = await GetOwnedApp(appId, AppType.Crowdfund);
+            if (app == null)
+                return NotFound();
+            vm.TargetCurrency = await GetStoreDefaultCurrentIfEmpty(app.StoreDataId, vm.TargetCurrency);
+            if (_currencies.GetCurrencyData(vm.TargetCurrency, false) == null)
                 ModelState.AddModelError(nameof(vm.TargetCurrency), "Invalid currency");
 
             try
@@ -115,11 +121,6 @@ namespace BTCPayServer.Controllers
                 return View(vm);
             }
 
-
-            var app = await GetOwnedApp(appId, AppType.Crowdfund);
-            if (app == null)
-                return NotFound();
-
             var newSettings = new CrowdfundSettings()
             {
                 Title = vm.Title,
@@ -142,6 +143,7 @@ namespace BTCPayServer.Controllers
                 AnimationsEnabled = vm.AnimationsEnabled,
                 ResetEveryAmount = vm.ResetEveryAmount,
                 ResetEvery = Enum.Parse<CrowdfundResetEvery>(vm.ResetEvery),
+                DisplayPerksValue = vm.DisplayPerksValue,
                 DisplayPerksRanking = vm.DisplayPerksRanking,
                 SortPerksByPopularity = vm.SortPerksByPopularity,
                 Sounds = parsedSounds,
